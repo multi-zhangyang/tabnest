@@ -96,6 +96,7 @@ export function BookmarkGrid({
         virtual
           ? {
               position: "relative",
+              overflowAnchor: "none",
               paddingTop: first * metrics.stride,
               paddingBottom: (rows - last) * metrics.stride,
             }

@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', '.shots', 'artifacts']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -17,6 +17,12 @@ export default defineConfig([
     ],
     languageOptions: {
       globals: globals.browser,
+    },
+  },
+  {
+    files: ['src/components/ui/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': ['error', { allowExportNames: ['buttonVariants', 'badgeVariants', 'buttonGroupVariants', 'tabsListVariants', 'tabsTriggerVariants', 'toggleVariants'] }],
     },
   },
 ])

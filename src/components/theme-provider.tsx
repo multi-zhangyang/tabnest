@@ -198,9 +198,15 @@ export function ThemeProvider({
     }
 
     window.addEventListener("storage", handleStorageChange)
+    const restore = () => {
+      const value = localStorage.getItem(storageKey)
+      if (isTheme(value)) setThemeState(value)
+    }
+    window.addEventListener("tabnest:theme", restore)
 
     return () => {
       window.removeEventListener("storage", handleStorageChange)
+      window.removeEventListener("tabnest:theme", restore)
     }
   }, [defaultTheme, storageKey])
 

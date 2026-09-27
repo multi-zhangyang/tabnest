@@ -1,21 +1,88 @@
-# React + TypeScript + Vite + shadcn/ui
+# TabNest
 
-This is a template for a new Vite project with React, TypeScript, and shadcn/ui.
+基于 **shadcn/ui 官方 Radix Nova 组件** 的 Chrome 新标签页扩展。React 19、TypeScript、Vite 8、Tailwind CSS 4、Manifest V3。
 
-## Adding components
+## 使用
 
-To add components to your app, run the following command:
+1. 执行 `npm ci`、`npm run build`，或解压发布 ZIP。
+2. 打开 `chrome://extensions`，启用开发者模式，加载项目的 `dist` 或解压后的目录。
+3. 打开新标签页。更新本地构建后，在扩展管理页重新加载扩展。
+
+开发预览：`npm run dev`。浏览器预览使用独立样例数据；真实扩展直接操作 Chrome 书签。不要通过双击 `index.html` 预览。
+
+## 功能与交互
+
+主导航只有「热度云图 / 分区」。新建入口集中在顶部，统计与设置使用独立弹窗；不再提供最近添加页面、重复的布局入口或问候时间栏。
+
+- **热度云图**：真实点击次数决定面积，图标和文字随卡片尺寸变化。横向、竖向和近方形卡片以小间距混排；没有分页，内容多时连续向下延伸。取消手动重排，按书签集合与视口宽度保留布局关系；支持悬停光效与点击热度反馈，尊重减少动态效果的系统偏好。
+- **分区**：顶部切换 Chrome 根目录，下方以独立区块同时展示文件夹。每个区块直接显示所属书签，按内容高度排列；子文件夹标明上级路径，不将后代书签重复放进父区块。支持紧凑网格、列表和独立折叠，记住所选目录与排列方式。无侧栏，分区不使用热度尺寸或配色。
+- **文件夹管理**：新建、重命名、移动、递归删除；保持 Chrome 父子关系，保护系统根目录和受管理内容，禁止移入自身或后代。
+- **书签管理**：新建、编辑、跨文件夹移动、排序移动、删除、复制网址、批量打开。支持分区内拖放排序、跨文件夹拖放、多选移动／删除。删除和大量打开保留必要确认；可通过「撤销」或设置中的「最近删除」恢复。
+- **搜索与统计**：标题、网址和文件夹路径多关键词匹配，标题精确匹配优先；匹配文件夹可直接定位到分区。中文输入法确认候选词不会打开书签，紧凑结果显示所属目录；`Ctrl K` / `⌘ K` 聚焦，方向键选择，回车打开，`Esc` 返回。统计展示书签／网址数量、打开次数、文件夹分布和常用网站；点击重复书签的「查看」可逐项检查、编辑或删除。
+- **备份**：设置 → 数据中导出 TabNest JSON；导入 v2／v3／v4 备份至一个新文件夹，保留层级，原有书签不被覆盖。可额外导出完整备份；导入时可选择恢复热度、主题和设置，文件夹偏好映射到新 ID，计数按网址取较大值。导入限制 10 MB、2000 个文件夹、20000 个书签、100 层深度。
+- **外观**：亮暗／系统主题、间距、字号、视觉缩放、图标、域名显示与打开方式。原产品 Logo 保留，无 Beta 标签，无教程式 UI 文案。
+- **卡片与表单**：陶瓷浅色／石墨深色、淡品牌色、统一图标底座和细边缘。书签、文件夹及导入共用编辑窗口；文件夹选择与新建组成同一控件，长名称截断，短窗口内独立滚动表单并固定操作区，保存时阻止关闭。
+- **滚动**：主页面隐藏滚动条，保留浏览器原生连续滚动；支持滚轮、触控板、触摸和键盘。打开菜单或弹窗不改变背景布局宽度，关闭后保持浏览位置。键盘定位搜索结果会避开固定顶部导航。
+
+## 开发与验收
+
+Node.js 22.12+，本地验收使用 Node.js 24 和 Windows Chrome。
 
 ```bash
-npx shadcn@latest add button
+npm ci
+npm run dev
+npm run lint
+npm test                  # 数据、迁移、布局与 Chrome 故障回滚测试
+npm run build
+npm run test:browser      # 自动启动构建预览；交互、截图、几何、无障碍检查
+npm run test:extension    # 独立临时 Chrome 配置；实际加载 MV3 扩展
+npm run test:scroll       # 原生滚动条环境；逐帧布局稳定性、滚动与弹窗锁定
+npm run test:ui-details   # 长名称、弹窗边界、窄窗口、保存状态与表单无障碍
+npm run test:product     # 原生修饰键、拖放、多选、恢复及完整备份
+npm run test:performance # 500／2000／5000 书签基线、虚拟渲染与末尾可达性
+npm run check            # 上述完整检查
+npm run release          # 检查后生成 ZIP、SHA-256 与发布报告
 ```
 
-This will place the ui components in the `src/components` directory.
+测试自动寻找 Chrome，可通过 `CHROME_PATH` 指定路径。`TEST_URL` 仅用于覆盖浏览器测试的预览地址。测试不使用个人 Chrome 配置，不读取日常书签。截图、报告和发布包位于 `artifacts/`。
 
-## Using components
+GitHub Actions 工作流执行同样的检查并保存产物，**不会自动发布到商店**。本地通过不等于远程 CI 已执行。
 
-To use the components in your app, import them as follows:
+## 数据边界
 
-```tsx
-import { Button } from "@/components/ui/button"
+- Chrome 是书签树的唯一来源；文件夹 ID、父节点、根节点、排序和只读属性不由界面重新定义。
+- 点击数以网址为键，统计在 TabNest 中触发的打开操作，不读取浏览历史；同网址的重复书签共享热度。正式扩展从零开始，开发预览有样例计数。
+- 面积权重为 `2 + log2(1 + 点击次数)`，没有人为热度上限。采用固定分割树与间距面积补偿，保证同一画布内更多点击对应更大面积。对数缩放防止少数常用网站挤占全部空间。
+- 设置和热度使用版本化 `chrome.storage.local`，兼容旧版 sync 数据读取。跨页写入串行合并；迁移先保留原始值，不覆盖未知版本的数据。
+- 网站图标优先使用打包资源和 Chrome 图标服务。只有开启“在线图标”才直接请求目标网站 `/favicon.ico`。
+- 「导出书签」仅包含书签和文件夹；「导出完整备份」还包含设置、热度和主题。不包含账号凭据、删除记录或布局缓存。导入与删除恢复会生成新的 Chrome 书签 ID 和添加时间。
+
+没有账号、广告、分析埋点或远程同步服务。Chrome 本身的书签同步由浏览器管理。更多边界见 [架构说明](docs/architecture.md) 和 [隐私说明](docs/privacy.md)。
+
+## 目录
+
+```text
+src/components/ui/          shadcn 官方组件源码
+src/components/             页面组件、文件夹区块、云图、编辑器与设置
+src/hooks/use-bookmarks.ts  生命周期、并发请求与跨页订阅
+src/hooks/use-library-actions.ts 书签操作、确认状态与导出
+src/hooks/use-bookmark-search.ts 搜索、重复筛选与键盘导航
+src/lib/bookmarks.ts        Chrome / 预览书签仓库
+src/lib/folders.ts          文件夹层级与受保护操作
+src/lib/storage.ts          版本化持久化、迁移和恢复副本
+src/lib/preferences.ts      设置和点击计数
+src/lib/backup.ts           备份校验及增量导入
+src/lib/heat-layout.ts      云图分割与面积补偿
+public/                     MV3 清单、原 Logo、品牌图标
+tools/                      测试、浏览器运行器和可重复打包
 ```
+
+商店发布前仍需准备商店素材、公开隐私政策地址并完成实际提审。当前验证范围是本地 Chrome，含 500／2000／5000 书签场景；Edge、组织策略、账号与本地书签并存及更大规模仍需对应验收。
+
+## 2.5.0 数据恢复与性能
+
+最近删除保留最近 20 次操作，记录上限 4 MB；先保存恢复记录，再执行原生删除。记录写入失败时不删除书签。恢复优先使用原父文件夹，不可用时回到可写根目录；批量恢复按原始索引排序。Chrome 无法恢复原节点 ID 与创建时间，也无法撤销已发生的浏览器同步传播。
+
+热度云图、搜索结果与大型分区按视口渲染，保留完整原生滚动高度、全量搜索及键盘访问。云图布局缓存保留最近 4 个书签集合／宽度组合，新增、删除书签或改变窗口宽度会重新建图，热度变化保留已有分割关系。缓存失败不影响书签访问。
+
+性能报告见 `artifacts/performance-check.json`；这是当前机器的独立测试数据，不代表所有硬件或真实网络条件。

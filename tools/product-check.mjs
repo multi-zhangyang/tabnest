@@ -66,7 +66,13 @@ try {
         data: { layout: "zones", newTab: true },
       },
     })
-    return { source: source.id, target: target.id, root: root.id, items }
+    return {
+      source: source.id,
+      target: target.id,
+      root: root.id,
+      rootTitle: root.title,
+      items,
+    }
   })
   await page.waitForSelector(`[data-bookmark-id="${fixture.items[0].id}"]`)
   assert.equal(
@@ -201,7 +207,7 @@ try {
   await click("移动", ".management-bar button")
   await page.locator("#batch-parent").click()
   await page.locator('[aria-label="查找文件夹"]').fill("目标文件夹")
-  await click("书签栏 / 目标文件夹", "[cmdk-item]")
+  await click(`${fixture.rootTitle} / 目标文件夹`, "[cmdk-item]")
   await click("移动", '[role="dialog"] button')
   await page.waitForSelector('[role="dialog"]', { hidden: true })
   assert.deepEqual(await titles(fixture.target), ["Alpha", "Beta", "Gamma"])
@@ -228,7 +234,7 @@ try {
   checks.push("native-batch-delete-reload-restore-preserves-order")
   await page.keyboard.press("Escape")
   await page.locator('[aria-label="搜索书签"]').fill("目标文件夹")
-  await click("书签栏 / 目标文件夹", ".folder-results button")
+  await click(`${fixture.rootTitle} / 目标文件夹`, ".folder-results button")
   assert.equal(
     await page.$eval(
       `[data-folder-id="${fixture.target}"]`,

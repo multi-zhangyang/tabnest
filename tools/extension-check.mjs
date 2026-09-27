@@ -66,7 +66,9 @@ try {
     })
     return {
       bar: bar.id,
+      barTitle: bar.title,
       other: other.id,
+      otherTitle: other.title,
       folder: folder.id,
       nested: nested.id,
       rootBookmark: rootBookmark.id,
@@ -132,13 +134,13 @@ try {
       `[data-folder-id="${fixture.nested}"] .section-path`,
       (el) => el.textContent
     ),
-    "书签栏 / 层级验收"
+    `${fixture.barTitle} / 层级验收`
   )
   assert.equal(
     await page.evaluate(() => document.body.textContent.includes("所有分区")),
     false
   )
-  await page.click('[aria-label="书签栏根目录操作"]')
+  await page.click(`[aria-label="${fixture.barTitle}根目录操作"]`)
   for (const action of ["重命名", "移动文件夹", "删除文件夹"]) {
     assert.equal(
       await page.evaluate(
@@ -171,7 +173,7 @@ try {
   await page.click('[aria-label="子文件夹文件夹操作"]')
   await clickText(page, '[role="menuitem"]', "移动文件夹")
   await page.locator("#folder-parent").click()
-  await clickText(page, "[cmdk-item]", "其他书签")
+  await clickText(page, "[cmdk-item]", fixture.otherTitle)
   await clickText(page, '[role="dialog"] button', "保存")
   await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
   assert.equal(

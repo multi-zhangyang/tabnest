@@ -204,13 +204,23 @@ try {
     await page.locator('[aria-label="退出多选"]').click()
     await page.focus('[aria-label="搜索书签"]')
     await page.keyboard.press("End")
-    await page.waitForSelector(
-      `.search-results [data-bookmark-id="b${count - 1}"]`
+    const reachable = await page.waitForFunction(
+      (count) => {
+        const last = document.querySelector(
+          `.search-results [data-bookmark-id="b${count - 1}"]`
+        )
+        if (!last || last.dataset.selected !== "true") return false
+        const bounds = last.getBoundingClientRect()
+        const headerBottom =
+          document.querySelector(".app-header")?.getBoundingClientRect()
+            .bottom || 0
+        return bounds.top >= headerBottom && bounds.bottom <= innerHeight + 1
+      },
+      { timeout: 3000, polling: "raf" },
+      count
     )
-    const lastReachable = await page.$eval(
-      `.search-results [data-bookmark-id="b${count - 1}"]`,
-      (el) => el.getBoundingClientRect().bottom <= innerHeight + 1
-    )
+    const lastReachable = await reachable.jsonValue()
+    await reachable.dispose()
     assert.ok(lastReachable, "keyboard search cannot reach final result")
     await page.keyboard.press("Escape")
     console.log(JSON.stringify({ bookmarks: count, stage: "sections" }))

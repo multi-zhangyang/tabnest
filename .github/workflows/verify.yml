@@ -19,9 +19,28 @@ jobs:
         with:
           chrome-version: stable
       - run: npm ci
-      - run: npm run release
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm run test:performance
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+      - run: npm run test:browser
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+      - run: npm run test:extension
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+      - run: npm run test:scroll
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+      - run: npm run test:ui-details
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+      - run: npm run test:product
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+      - run: node tools/release.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

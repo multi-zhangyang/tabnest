@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { mkdir, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
-import { launchBrowser, servePreview } from "./runtime.mjs"
+import { launchBrowser, openPreview, servePreview } from "./runtime.mjs"
 import { sectionFixture } from "./section-fixture.mjs"
 
 const preview = await servePreview()
@@ -57,7 +57,7 @@ function fixture(count) {
 }
 
 async function seedPreview(count) {
-  await page.goto(preview.url)
+  await openPreview(page, preview.url)
   await page.evaluate((data) => {
     localStorage.setItem("tabnest:demo-bookmarks:v2", JSON.stringify(data))
     localStorage.setItem("tabnest:settings", JSON.stringify({ layout: "heat" }))

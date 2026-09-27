@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { mkdir, writeFile } from "node:fs/promises"
 import axe from "axe-core"
 import { AxePuppeteer } from "@axe-core/puppeteer"
-import { launchBrowser, servePreview } from "./runtime.mjs"
+import { launchBrowser, openPreview, servePreview } from "./runtime.mjs"
 import { sectionFixture } from "./section-fixture.mjs"
 
 const preview = await servePreview(),
@@ -124,7 +124,7 @@ async function pickerGeometry() {
 
 try {
   await mkdir("artifacts", { recursive: true })
-  await page.goto(preview.url, { waitUntil: "networkidle0" })
+  await openPreview(page, preview.url, { waitUntil: "networkidle0" })
   const data = sectionFixture()
   const longFolder = data.folders.find((folder) => folder.id === "folder-ai")
   longFolder.title = "长期项目资料_".repeat(35)

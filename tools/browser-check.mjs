@@ -1,4 +1,4 @@
-import { launchBrowser, servePreview } from "./runtime.mjs"
+import { launchBrowser, openPreview, servePreview } from "./runtime.mjs"
 import axe from "axe-core"
 import { AxePuppeteer } from "@axe-core/puppeteer"
 import assert from "node:assert/strict"
@@ -126,7 +126,7 @@ try {
       }
     })
   }
-  await page.goto(base, { waitUntil: "networkidle0" })
+  await openPreview(page, base, { waitUntil: "networkidle0" })
   await page.waitForSelector(".heat-card")
   assert.equal((await geometry()).count, 24)
   for (const [width, height, name] of [

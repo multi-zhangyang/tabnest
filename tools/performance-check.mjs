@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { writeFile, mkdir } from "node:fs/promises"
-import { launchBrowser, servePreview } from "./runtime.mjs"
+import { launchBrowser, openPreview, servePreview } from "./runtime.mjs"
 
 const preview = await servePreview(),
   browser = await launchBrowser()
@@ -10,7 +10,7 @@ try {
   for (const count of [500, 2000, 5000]) {
     const page = await browser.newPage()
     page.on("pageerror", (error) => errors.push(error.message))
-    await page.goto(preview.url)
+    await openPreview(page, preview.url)
     await page.evaluate((count) => {
       const folders = [
         {

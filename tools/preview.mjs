@@ -1,11 +1,11 @@
 import { mkdir } from "node:fs/promises"
-import { launchBrowser, servePreview } from "./runtime.mjs"
+import { launchBrowser, openPreview, servePreview } from "./runtime.mjs"
 const preview = await servePreview()
 const browser = await launchBrowser()
 try {
   const page = await browser.newPage()
   page.on("pageerror", (error) => console.log("PAGE ERROR:", error.message))
-  await page.goto(preview.url, { waitUntil: "networkidle0" })
+  await openPreview(page, preview.url, { waitUntil: "networkidle0" })
   await page.waitForSelector(".heat-card")
   await mkdir("artifacts", { recursive: true })
   await page.screenshot({ path: "artifacts/heat-dark.png" })

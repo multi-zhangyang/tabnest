@@ -29,6 +29,22 @@ export function launchBrowser(options = {}) {
     ...options,
   })
 }
+export async function openPreview(page, url, options = {}) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await page.goto(url, options)
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !error.message.startsWith("net::ERR_ABORTED at ") ||
+        attempt === 2
+      )
+        throw error
+      console.warn(`Preview navigation aborted; retry ${attempt + 1}/2`)
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+  }
+}
 export async function servePreview() {
   if (process.env.TEST_URL)
     return { url: process.env.TEST_URL, close: async () => {} }

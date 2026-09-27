@@ -204,21 +204,57 @@ try {
     await page.locator('[aria-label="退出多选"]').click()
     await page.focus('[aria-label="搜索书签"]')
     await page.keyboard.press("End")
-    const reachable = await page.waitForFunction(
-      (count) => {
-        const last = document.querySelector(
-          `.search-results [data-bookmark-id="b${count - 1}"]`
+    const reachable = await page
+      .waitForFunction(
+        (count) => {
+          const last = document.querySelector(
+            `.search-results [data-bookmark-id="b${count - 1}"]`
+          )
+          if (!last || last.dataset.selected !== "true") return false
+          const bounds = last.getBoundingClientRect()
+          const headerBottom =
+            document.querySelector(".app-header")?.getBoundingClientRect()
+              .bottom || 0
+          return bounds.top >= headerBottom && bounds.bottom <= innerHeight + 1
+        },
+        { timeout: 3000, polling: "raf" },
+        count
+      )
+      .catch(async (error) => {
+        const diagnostic = await page.evaluate((count) => {
+          const grid = document.querySelector(".search-results")
+          const card = document.querySelector(
+            `[data-bookmark-id="b${count - 1}"]`
+          )
+          const bounds = (element) => element?.getBoundingClientRect().toJSON()
+          return {
+            count,
+            userAgent: navigator.userAgent,
+            scrollY,
+            viewport: { width: innerWidth, height: innerHeight },
+            documentHeight: document.documentElement.scrollHeight,
+            header: bounds(document.querySelector(".app-header")),
+            grid: bounds(grid),
+            paddingTop: grid && getComputedStyle(grid).paddingTop,
+            paddingBottom: grid && getComputedStyle(grid).paddingBottom,
+            columns: grid && getComputedStyle(grid).gridTemplateColumns,
+            target: bounds(card),
+            selected: card?.dataset.selected,
+            items: [...(grid?.children || [])].map((element) => ({
+              index: element.dataset.gridIndex,
+              bounds: bounds(element),
+            })),
+          }
+        }, count)
+        await mkdir("artifacts", { recursive: true })
+        await writeFile(
+          "artifacts/performance-failure.json",
+          JSON.stringify(diagnostic, null, 2)
         )
-        if (!last || last.dataset.selected !== "true") return false
-        const bounds = last.getBoundingClientRect()
-        const headerBottom =
-          document.querySelector(".app-header")?.getBoundingClientRect()
-            .bottom || 0
-        return bounds.top >= headerBottom && bounds.bottom <= innerHeight + 1
-      },
-      { timeout: 3000, polling: "raf" },
-      count
-    )
+        await page.screenshot({ path: "artifacts/performance-failure.png" })
+        console.error(JSON.stringify(diagnostic))
+        throw error
+      })
     const lastReachable = await reachable.jsonValue()
     await reachable.dispose()
     assert.ok(lastReachable, "keyboard search cannot reach final result")

@@ -6,6 +6,7 @@ import { launchBrowser } from "./runtime.mjs"
 const browser = await launchBrowser({ pipe: true, enableExtensions: true })
 const checks = [],
   errors = []
+let currentPage, currentSample
 try {
   const id = await browser.installExtension(resolve("dist"))
   const url = `chrome-extension://${id}/index.html`
@@ -25,6 +26,7 @@ try {
         })
       }, layout)
       const page = await browser.newPage()
+      currentPage = page
       page.on("pageerror", (e) => errors.push(e.message))
       await page.evaluateOnNewDocument((latency) => {
         const get = chrome.storage.local.get.bind(chrome.storage.local)
@@ -51,6 +53,7 @@ try {
       }, latency)
       const expected = layout === "zones" ? "文件夹视图" : "书签拼图"
       for (const navigation of ["new-tab", "reload"]) {
+        currentSample = { layout, latency, navigation }
         if (navigation === "new-tab") await page.goto(url)
         else await page.reload()
         await page.waitForFunction(
@@ -70,6 +73,13 @@ try {
           "Initial mode must not animate"
         )
         checks.push({ layout, latency, navigation, frames: frames.length })
+        const themeAnimations = await page.evaluate(() => {
+          document.documentElement.classList.toggle("dark")
+          const animations = document.querySelector(".main-tabs").getAnimations({ subtree: true }).length
+          document.documentElement.classList.toggle("dark")
+          return animations
+        })
+        assert.equal(themeAnimations, 0, "Late theme styles must not animate initial navigation")
       }
       await page.close()
     }
@@ -133,6 +143,7 @@ try {
   await peer.goto(url)
   await setup.bringToFront()
   await setup.locator('[aria-label="书签拼图"]').click()
+  assert.equal(await setup.$eval(".main-tabs", (nav) => nav.dataset.interacted), "true")
   await peer.bringToFront()
   await peer.waitForSelector('[aria-label="书签拼图"][aria-selected="true"]')
   checks.push({ name: "manual-switch-cross-tab" })
@@ -143,6 +154,14 @@ try {
     JSON.stringify({ checks, errors }, null, 2)
   )
   console.log(JSON.stringify({ passed: checks.length, errors }))
+} catch (error) {
+  await mkdir("artifacts", { recursive: true })
+  const frames = await currentPage?.evaluate(() => window.__navigationFrames).catch(() => null)
+  await writeFile("artifacts/startup-failure.json", JSON.stringify({
+    sample: currentSample, error: error.stack, frames, checks, errors,
+  }, null, 2))
+  await currentPage?.screenshot({ path: "artifacts/startup-failure.png" }).catch(() => {})
+  throw error
 } finally {
   await browser.close()
 }

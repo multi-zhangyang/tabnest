@@ -238,6 +238,10 @@ body {
 .main-tabs[data-ready="false"] {
   visibility: hidden;
 }
+.main-tabs:not([data-interacted]) [data-slot="tabs-trigger"],
+.main-tabs:not([data-interacted]) [data-slot="tabs-trigger"]::after {
+  transition: none;
+}
 .search-field {
   width: 100%;
   max-width: 440px;

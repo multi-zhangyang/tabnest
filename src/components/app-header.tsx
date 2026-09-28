@@ -1,3 +1,4 @@
+import { useState } from "react"
 import {
   BarChart3,
   FolderPlus,
@@ -42,6 +43,7 @@ export function AppHeader({
   writable: boolean
 }) {
   const { clear } = search
+  const [interacted, setInteracted] = useState(false)
   return (
     <header className="app-header">
       <a
@@ -67,6 +69,9 @@ export function AppHeader({
         aria-label="书签视图"
         aria-busy={!ready}
         data-ready={ready}
+        data-interacted={interacted || undefined}
+        onPointerDownCapture={() => ready && setInteracted(true)}
+        onKeyDownCapture={() => ready && setInteracted(true)}
       >
         <TabsList key={ready ? "ready" : "pending"} aria-label="主导航">
           <TabsTrigger value="heat" aria-label="书签拼图">

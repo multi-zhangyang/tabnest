@@ -189,7 +189,7 @@ try {
       (e) => e.textContent === "新建书签"
     )
   )
-  await item.asElement().click()
+  await item.asElement().asLocator().click()
   await page.waitForSelector("#bookmark-url")
   await capture("editor-dark")
   assert.deepEqual(errors, [])

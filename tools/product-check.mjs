@@ -22,7 +22,7 @@ const click = async (text, selector = "button") => {
     text,
     selector
   )
-  await element.asElement().click()
+  await element.asElement().asLocator().click()
   await element.dispose()
   await delay()
 }

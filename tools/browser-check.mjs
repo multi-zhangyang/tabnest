@@ -34,7 +34,7 @@ try {
       selector,
       text
     )
-    await element.asElement().click()
+    await element.asElement().asLocator().click()
     await element.dispose()
     await delay(180)
   }

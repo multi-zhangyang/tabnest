@@ -22,7 +22,7 @@ const clickText = async (selector, text) => {
     selector,
     text
   )
-  await el.asElement().click()
+  await el.asElement().asLocator().click()
   await el.dispose()
   await delay()
 }

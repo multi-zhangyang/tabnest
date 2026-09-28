@@ -23,11 +23,15 @@ const scenarios = [
   { count: 20000, folders: 1000 },
   { count: 20000, folders: 2000 },
 ]
+let currentPage, currentSample, stage
 try {
   for (const scenario of scenarios) {
     const samples = []
     for (let run = 0; run < 5; run++) {
       const page = await browser.newPage()
+      currentPage = page
+      currentSample = { ...scenario, run: run + 1 }
+      stage = "startup"
       page.setDefaultTimeout(15000)
       page.on("pageerror", (e) => errors.push(e.message))
       await openPreview(page, preview.url)
@@ -91,6 +95,7 @@ try {
       )
       const firstCanvasMs = Math.round(performance.now() - start)
       const heatDOM = await page.$$eval(".heat-card", (els) => els.length)
+      stage = "heat-update"
       const heatUpdateMs = await page.evaluate(async () => {
         window.open = () => null
         const card = document.querySelector(".heat-card"),
@@ -116,6 +121,7 @@ try {
         return Math.round(performance.now() - start)
       })
       await page.locator('[aria-label="打开搜索"]').click()
+      stage = "search"
       await page.waitForSelector('[aria-label="搜索书签"]')
       const searchMs = await page.evaluate(async (count) => {
         const input = document.querySelector('[aria-label="搜索书签"]'),
@@ -151,12 +157,14 @@ try {
         return `b${Number(last.dataset.bookmarkId.slice(1)) + 1}`
       })
       await page.keyboard.press("Tab")
+      stage = "search-tab"
       await page.waitForFunction(
         (id) => document.activeElement?.dataset.bookmarkId === id,
         {},
         target
       )
       await page.keyboard.press("End")
+      stage = "search-end"
       await page.waitForFunction(
         (count) => {
           const el = document.activeElement,
@@ -171,6 +179,7 @@ try {
         scenario.count
       )
       await clearSearch(page)
+      stage = "folders"
       const zoneStart = performance.now()
       await page.locator('[aria-label="文件夹视图"]').click()
       await page.waitForSelector(".section-bookmarks .bookmark-card")
@@ -271,6 +280,50 @@ try {
       `click P95 ${result.p95.heatUpdateMs}`
     )
   }
+} catch (error) {
+  const geometry = await currentPage
+    ?.evaluate(() => {
+      const active = document.activeElement
+      const grid = document.querySelector(".search-results")
+      return {
+        focus: active?.outerHTML.slice(0, 600),
+        bounds: active?.getBoundingClientRect().toJSON(),
+        scrollY,
+        height: innerHeight,
+        scrollHeight: document.documentElement.scrollHeight,
+        grid: grid && {
+          bounds: grid.getBoundingClientRect().toJSON(),
+          style: grid.getAttribute("style"),
+          columns: getComputedStyle(grid).gridTemplateColumns,
+        },
+        mounted: [
+          ...document.querySelectorAll(".search-results .bookmark-card"),
+        ].map((el) => ({
+          id: el.dataset.bookmarkId,
+          bounds: el.getBoundingClientRect().toJSON(),
+        })),
+      }
+    })
+    .catch(() => null)
+  await writeFile(
+    "artifacts/performance-failure.json",
+    JSON.stringify(
+      {
+        sample: currentSample,
+        stage,
+        error: error.stack,
+        geometry,
+        results,
+        errors,
+      },
+      null,
+      2
+    )
+  )
+  await currentPage
+    ?.screenshot({ path: "artifacts/performance-failure.png" })
+    .catch(() => {})
+  throw error
 } finally {
   await browser.close()
   await preview.close()

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs"
+import { mkdir } from "node:fs/promises"
 import { preview } from "vite"
 import puppeteer from "puppeteer-core"
 
@@ -24,7 +25,14 @@ export function launchBrowser(options = {}) {
     headless: true,
     // Puppeteer hides scrollbars by default, masking native scroll-lock shifts.
     ignoreDefaultArgs: ["--hide-scrollbars"],
-    args: ["--disable-gpu"],
+    // Hosted Ubuntu runners restrict the downloaded Chrome's user namespaces.
+    // This applies only to disposable Actions test browsers, never local profiles.
+    args: [
+      "--disable-gpu",
+      ...(process.platform === "linux" && process.env.GITHUB_ACTIONS === "true"
+        ? ["--no-sandbox"]
+        : []),
+    ],
     defaultViewport: { width: 1440, height: 900, deviceScaleFactor: 1 },
     ...options,
   })
@@ -46,6 +54,7 @@ export async function openPreview(page, url, options = {}) {
   }
 }
 export async function servePreview() {
+  await mkdir("artifacts", { recursive: true })
   if (process.env.TEST_URL)
     return { url: process.env.TEST_URL, close: async () => {} }
   const server = await preview({

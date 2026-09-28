@@ -7,8 +7,9 @@ const preview = await servePreview(),
   browser = await launchBrowser()
 const checks = [],
   errors = []
+let page
 try {
-  const page = await browser.newPage()
+  page = await browser.newPage()
   page.on("pageerror", (e) => errors.push(e.message))
   await openPreview(page, preview.url)
   await page.evaluate(() => {
@@ -69,7 +70,8 @@ try {
   await page.keyboard.press("Home")
   await reveal("b0")
   checks.push("home-reveals-first-result")
-  await page.evaluate(() => scrollTo(0, 3000))
+  await page.mouse.move(700, 500)
+  await page.mouse.wheel({ deltaY: 3000 })
   await new Promise((r) => setTimeout(r, 200))
   assert.ok(
     await page.evaluate(() => scrollY >= 2999),
@@ -82,6 +84,25 @@ try {
     JSON.stringify({ checks, errors }, null, 2)
   )
   console.log(JSON.stringify({ checks, errors }))
+} catch (error) {
+  await page
+    ?.screenshot({ path: "artifacts/virtual-focus-failure.png" })
+    .catch(() => {})
+  const geometry = await page
+    ?.evaluate(() => ({
+      focus: document.activeElement?.outerHTML.slice(0, 400),
+      rect: document.activeElement?.getBoundingClientRect().toJSON(),
+      grid: document.querySelector(".search-results")?.getAttribute("style"),
+      scrollY,
+      height: innerHeight,
+      scrollHeight: document.documentElement.scrollHeight,
+    }))
+    .catch(() => null)
+  await writeFile(
+    "artifacts/virtual-focus-failure.json",
+    JSON.stringify({ error: error.stack, checks, geometry, errors }, null, 2)
+  )
+  throw error
 } finally {
   await browser.close()
   await preview.close()

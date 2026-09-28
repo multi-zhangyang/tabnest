@@ -46,6 +46,12 @@ try {
                   .querySelector('[aria-selected="true"]')
                   ?.getAttribute("aria-label") || null,
               transitions: nav.getAnimations({ subtree: true }).length,
+              animations: nav.getAnimations({ subtree: true }).map((animation) => ({
+                type: animation.constructor.name,
+                property: animation.transitionProperty,
+                name: animation.animationName,
+                target: animation.effect?.target?.outerHTML?.slice(0, 700),
+              })),
             })
           requestAnimationFrame(sample)
         }

@@ -238,9 +238,12 @@ body {
 .main-tabs[data-ready="false"] {
   visibility: hidden;
 }
-.main-tabs:not([data-interacted]) [data-slot="tabs-trigger"],
-.main-tabs:not([data-interacted]) [data-slot="tabs-trigger"]::after {
+.main-tabs:not([data-interacted]),
+.main-tabs:not([data-interacted]) *,
+.main-tabs:not([data-interacted]) *::before,
+.main-tabs:not([data-interacted]) *::after {
   transition: none;
+  animation: none;
 }
 .search-field {
   width: 100%;

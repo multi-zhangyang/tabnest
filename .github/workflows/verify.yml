@@ -26,6 +26,9 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npm run test:startup
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
       - run: npm run test:virtual-focus
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
@@ -36,9 +39,6 @@ jobs:
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
       - run: npm run test:extension
-        env:
-          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
-      - run: npm run test:startup
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
       - run: npm run test:scroll

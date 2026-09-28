@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { launchBrowser, openPreview, servePreview } from "./runtime.mjs"
 import { sectionFixture } from "./section-fixture.mjs"
+import { openSearch, showSearchResults } from "./search-helpers.mjs"
 
 const preview = await servePreview()
 const browser = await launchBrowser({ pipe: true, enableExtensions: true })
@@ -288,7 +289,7 @@ try {
 
   await seedPreview(180)
   for (const layout of ["heat", "zones"]) {
-    await clickLabel(layout === "heat" ? "热度云图" : "分区视图")
+    await clickLabel(layout === "heat" ? "书签拼图" : "文件夹视图")
     await delay(350)
     await page.evaluate(() => scrollTo(0, 0))
     await headerOverlays(`${layout}/top`)
@@ -305,21 +306,16 @@ try {
   }
 
   // Keyboard search must reveal results without hiding them behind the sticky header.
-  await clickLabel("搜索书签")
-  await page.keyboard.type("scroll")
-  await page.keyboard.press("End")
+  await openSearch(page, "scroll")
+  await page.keyboard.press("ArrowDown")
   await delay()
-  await page.keyboard.press("Home")
-  await delay()
-  const selected = await page.$eval('[data-selected="true"]', (el) => ({
-    top: el.getBoundingClientRect().top,
-    header: document.querySelector(".app-header").getBoundingClientRect()
-      .bottom,
-  }))
-  assert.ok(
-    selected.top >= selected.header,
-    "Keyboard result must clear the sticky header"
-  )
+  const selected = await page.$eval('.search-dialog [aria-selected="true"]', el => {
+    const bounds = el.getBoundingClientRect(), list = el.closest('[cmdk-list]').getBoundingClientRect()
+    return { top: bounds.top, bottom: bounds.bottom, listTop: list.top, listBottom: list.bottom }
+  })
+  assert.ok(selected.top >= selected.listTop && selected.bottom <= selected.listBottom, "Command selection must stay in the viewport")
+  await page.keyboard.press("Escape")
+  await showSearchResults(page, "scroll")
   await headerOverlays("search")
   await page.locator('[aria-label="清空搜索"]').click()
 
@@ -367,7 +363,7 @@ try {
     () => document.querySelectorAll(".bookmark-card").length === 180
   )
   for (const layout of ["heat", "zones"]) {
-    await clickLabel(layout === "heat" ? "热度云图" : "分区视图")
+    await clickLabel(layout === "heat" ? "书签拼图" : "文件夹视图")
     await delay(350)
     await page.evaluate(() => scrollTo(0, 420))
     await headerOverlays(`extension/${layout}`)

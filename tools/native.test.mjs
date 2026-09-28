@@ -265,3 +265,18 @@ test("failed native tree restoration rolls back only created nodes and remains r
   )
   await assert.rejects(recovery.restoreDeleted(entry.id), /已恢复/)
 })
+test('native v5 import creates folders and bookmarks in mixed sibling order', async()=>{
+  const data={folders:[{id:'r',title:'Root',path:'Root'},{id:'f',title:'Middle folder',path:'Root / Middle folder',parentId:'r',index:1}],groups:[{id:'r',name:'Root',items:[{id:'a',title:'First',url:'https://first.test',parentId:'r',index:0},{id:'b',title:'Last',url:'file:///C:/last.pdf',parentId:'r',index:2}]},{id:'f',name:'Middle folder',items:[]}]}
+  const root=await backups.importBackup(data,'1')
+  const imported=[...nodes.values()].find(n=>n.parentId===root&&n.title==='Root')
+  assert.deepEqual([...nodes.values()].filter(n=>n.parentId===imported.id).map(n=>n.title),['First','Middle folder','Last'])
+})
+test('account, local and managed roots coexist without merging identities',async()=>{
+  nodes.set('40',{id:'40',title:'书签栏',parentId:'0',folderType:'bookmarks-bar',syncing:true})
+  nodes.set('41',{id:'41',title:'Account bookmark',url:'https://account.test/',parentId:'40',index:0})
+  const data=await repository.fetchBookmarkData()
+  assert.ok(data.folders.find(folder=>folder.id==='1').root)
+  assert.ok(data.folders.find(folder=>folder.id==='40').root)
+  assert.equal(data.groups.find(group=>group.id==='40').items[0].id,'41')
+  assert.equal(data.folders.find(folder=>folder.id==='30').readOnly,true)
+})

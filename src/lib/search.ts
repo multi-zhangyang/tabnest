@@ -1,8 +1,13 @@
 import type { BookmarkFolder, BookmarkItem } from "./types"
+import { pinyin } from "pinyin-pro"
+import { normalizeSearch as normalize, queryTokens } from "./search-tokens"
+export { queryTokens } from "./search-tokens"
 
-const normalize = (text: string) => text.normalize("NFKC").toLocaleLowerCase()
-export const queryTokens = (query: string) =>
-  normalize(query).trim().split(/\s+/).filter(Boolean)
+const transliteration = (text: string) => {
+  if (!/[\u3400-\u9fff]/.test(text)) return ""
+  const words = pinyin(text, { toneType: "none", type: "array" })
+  return normalize(`${words.join("")} ${words.map((word) => word[0]).join("")}`)
+}
 
 export function createSearchIndex(
   items: BookmarkItem[],
@@ -11,12 +16,28 @@ export function createSearchIndex(
   const paths = new Map(
     folders.map((folder) => [folder.id, normalize(folder.path)])
   )
+  const pathLatin = new Map(
+    folders.map((folder) => [folder.id, transliteration(folder.path)])
+  )
   return items.map((item) => ({
     item,
     title: normalize(item.title),
+    latin: `${transliteration(item.title)} ${pathLatin.get(item.parentId || "") || ""}`,
     url: normalize(item.url),
     path: paths.get(item.parentId || "") || "",
   }))
+}
+
+export function createFolderSearchIndex(folders: BookmarkFolder[]) {
+  return createSearchIndex(
+    folders.map((folder) => ({
+      id: folder.id,
+      title: folder.title,
+      parentId: folder.id,
+      url: "",
+    })),
+    folders
+  )
 }
 
 export function searchBookmarks(
@@ -34,6 +55,7 @@ export function searchBookmarks(
         if (entry.title.includes(token)) score += 12
         else if (entry.url.includes(token)) score += 6
         else if (entry.path.includes(token)) score += 2
+        else if (entry.latin.includes(token)) score += 4
         else return []
       }
       return [{ item: entry.item, score }]

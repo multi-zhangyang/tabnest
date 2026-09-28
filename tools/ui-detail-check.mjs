@@ -162,6 +162,26 @@ try {
         "Long folder names must not widen the page"
       )
       await newBookmark()
+      const focus = await page.$eval("#bookmark-url", (input) => {
+        const style = getComputedStyle(input)
+        return {
+          active: document.activeElement === input,
+          border: style.borderWidth,
+          color: style.borderColor,
+          shadow: style.boxShadow,
+          outline: style.outlineStyle,
+          idleColor: getComputedStyle(document.querySelector("#bookmark-title"))
+            .borderColor,
+        }
+      })
+      assert.ok(focus.active, "Editor should keep input focus")
+      assert.equal(focus.border, "1px")
+      assert.notEqual(focus.color, focus.idleColor, "Focus must remain visible")
+      assert.ok(
+        focus.shadow === "none" || !/ [1-9][\d.]*px/.test(focus.shadow),
+        "Input must not have an outer halo"
+      )
+      assert.equal(focus.outline, "none")
       await editorGeometry(`${theme}/${width}x${height}/bookmark`)
       await page.locator("#bookmark-folder").click()
       await pickerGeometry()

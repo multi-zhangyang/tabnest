@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TabNest — 书签导航新标签页",
-  "version": "2.5.0",
-  "description": "以热度云图收藏常用网站。书签分区、即时搜索、访问统计与亮暗主题。",
+  "version": "2.6.1",
+  "description": "书签拼图随使用频率生长，文件夹保持井然有序。支持中文搜索、批量整理、本地备份与亮暗主题。",
   "chrome_url_overrides": {
     "newtab": "index.html"
   },

@@ -7,7 +7,8 @@ import {
 } from "./bookmarks"
 import type { BookmarkData } from "./bookmarks"
 import { AppError } from "./errors"
-import { normalizeUrl } from "./urls"
+import { storedUrl, safeUrl } from "./urls"
+import { beginOperation, checkpoint, finishOperation } from "./operations"
 import { withLock } from "./platform"
 import {
   clampSettings,
@@ -28,7 +29,7 @@ export type BackupData = BookmarkData & { preferences?: BackupPreferences }
 
 export type BookmarkBackup = {
   format: "tabnest"
-  version: 4
+  version: 5
   exportedAt: string
   folders: BookmarkData["folders"]
   groups: BookmarkData["groups"]
@@ -37,7 +38,7 @@ export type BookmarkBackup = {
 export function createBackup(data: BackupData): BookmarkBackup {
   return {
     format: "tabnest",
-    version: 4,
+    version: 5,
     exportedAt: new Date().toISOString(),
     ...data,
   }
@@ -51,7 +52,20 @@ export async function createFullBackup(data: BookmarkData) {
   return createBackup({ ...data, preferences: { settings, clicks, theme } })
 }
 
-export function parseBackup(text: string): BackupData {
+export type ImportIssue = {
+  id: string
+  title: string
+  url: string
+  reason: string
+  blocking: boolean
+}
+export type ImportPlan = {
+  data: BackupData
+  issues: ImportIssue[]
+  format: "json" | "html"
+}
+
+export function parseBackup(text: string, issues?: ImportIssue[]): BackupData {
   if (new TextEncoder().encode(text).length > 10 * 1024 * 1024)
     throw new AppError("invalid-data", "文件不能超过 10 MB")
   let raw: unknown
@@ -65,7 +79,7 @@ export function parseBackup(text: string): BackupData {
   const record = raw as Partial<BookmarkBackup>
   if (
     typeof record.version !== "number" ||
-    ![2, 3, 4].includes(record.version) ||
+    ![2, 3, 4, 5].includes(record.version) ||
     (Number(record.version) >= 3 && record.format !== "tabnest")
   )
     throw new AppError("invalid-data", "不支持此备份版本")
@@ -97,6 +111,10 @@ export function parseBackup(text: string): BackupData {
         id: folder.id,
         title: folder.title,
         path: folder.path,
+        index:
+          Number.isInteger(folder.index) && Number(folder.index) >= 0
+            ? folder.index
+            : undefined,
         parentId:
           folder.parentId && ids.has(folder.parentId)
             ? folder.parentId
@@ -110,18 +128,46 @@ export function parseBackup(text: string): BackupData {
     groups: input.groups.map((group) => ({
       id: group.id,
       name: group.name,
-      items: group.items.map((item) => {
+      items: group.items.flatMap((item) => {
         if (item.title.length > 1024)
           throw new AppError("invalid-data", "书签名称过长")
-        return {
-          id: item.id,
-          title: item.title,
-          url: normalizeUrl(item.url),
-          parentId: group.id,
-          dateAdded: Number.isFinite(item.dateAdded)
-            ? item.dateAdded
-            : undefined,
+        let url: string
+        try {
+          url = storedUrl(item.url)
+        } catch (cause) {
+          if (!issues) throw cause
+          issues.push({
+            id: item.id,
+            title: item.title,
+            url: item.url,
+            reason: "网址无效",
+            blocking: true,
+          })
+          return []
         }
+        if (issues && !safeUrl(url))
+          issues.push({
+            id: item.id,
+            title: item.title,
+            url,
+            reason: "仅保存",
+            blocking: false,
+          })
+        return [
+          {
+            id: item.id,
+            title: item.title,
+            url,
+            index:
+              Number.isInteger(item.index) && Number(item.index) >= 0
+                ? item.index
+                : undefined,
+            parentId: group.id,
+            dateAdded: Number.isFinite(item.dateAdded)
+              ? item.dateAdded
+              : undefined,
+          },
+        ]
       }),
     })),
   }
@@ -136,7 +182,7 @@ export function parseBackup(text: string): BackupData {
       current = current.parentId ? byId.get(current.parentId) : undefined
     }
   }
-  if (record.version === 4 && record.preferences !== undefined) {
+  if (Number(record.version) >= 4 && record.preferences !== undefined) {
     const prefs = record.preferences
     if (
       !prefs ||
@@ -147,7 +193,7 @@ export function parseBackup(text: string): BackupData {
       throw new AppError("invalid-data", "备份设置无效")
     const clicks: Record<string, number> = {}
     for (const [url, count] of Object.entries(validateClicks(prefs.clicks))) {
-      const key = normalizeUrl(url)
+      const key = safeUrl(url) || url
       clicks[key] = Math.max(clicks[key] || 0, count)
     }
     data.preferences = {
@@ -188,7 +234,8 @@ async function restorePreferences(
 export function importBackup(
   source: BackupData,
   parentId?: string,
-  restore = false
+  restore = false,
+  progress?: (completed: number, total: number) => void
 ) {
   return withLock("bookmarks", async () => {
     const data = parseBackup(JSON.stringify(createBackup(source)))
@@ -236,6 +283,7 @@ export function importBackup(
             title: folder.title,
             path,
             parentId: folder.parentId ? ids.get(folder.parentId) : rootId,
+            index: folder.index,
           })
           current.groups.push({
             id,
@@ -253,44 +301,76 @@ export function importBackup(
       await restorePreferences(data, ids, restore)
       return rootId
     }
+    const operation = await beginOperation("import", title)
     const created = new Set<string>()
-    const root = await chrome.bookmarks.create({
-      title,
-      ...(parentId ? { parentId } : {}),
-    })
-    created.add(root.id)
+    let root: chrome.bookmarks.BookmarkTreeNode | undefined
     const ids = new Map<string, string>()
     try {
-      const create = async (id: string): Promise<string> => {
-        if (ids.has(id)) return ids.get(id)!
-        const folder = data.folders.find((folder) => folder.id === id)!
-        const parent = folder.parentId ? await create(folder.parentId) : root.id
-        const result = await chrome.bookmarks.create({
-          parentId: parent,
-          title: folder.title,
-        })
-        created.add(result.id)
-        ids.set(id, result.id)
-        return result.id
+      root = await chrome.bookmarks.create({
+        title,
+        ...(parentId ? { parentId } : {}),
+      })
+      created.add(root.id)
+      operation.rootIds.push(root.id)
+      await checkpoint(operation)
+      const children = new Map<
+        string,
+        (
+          | { kind: "folder"; value: BookmarkData["folders"][number] }
+          | {
+              kind: "bookmark"
+              value: BookmarkData["groups"][number]["items"][number]
+            }
+        )[]
+      >()
+      const push = (
+        parent: string,
+        child: NonNullable<ReturnType<typeof children.get>>[number]
+      ) => {
+        const list = children.get(parent) || []
+        list.push(child)
+        children.set(parent, list)
       }
-      for (const folder of data.folders) await create(folder.id)
+      for (const folder of data.folders)
+        push(folder.parentId || "", { kind: "folder", value: folder })
       for (const group of data.groups)
-        for (const item of group.items) {
-          const bookmark = await chrome.bookmarks.create({
-            parentId: ids.get(group.id)!,
-            title: item.title,
-            url: item.url,
+        for (const item of group.items)
+          push(group.id, { kind: "bookmark", value: item })
+      const total =
+        data.folders.length +
+        data.groups.reduce((n, group) => n + group.items.length, 0)
+      const createChildren = async (sourceId: string, targetId: string) => {
+        const siblings = (children.get(sourceId) || []).sort(
+          (a, b) =>
+            (a.value.index ?? Number.MAX_SAFE_INTEGER) -
+            (b.value.index ?? Number.MAX_SAFE_INTEGER)
+        )
+        for (const child of siblings) {
+          const node = await chrome.bookmarks.create({
+            parentId: targetId,
+            title: child.value.title,
+            ...(child.kind === "bookmark" ? { url: child.value.url } : {}),
           })
-          created.add(bookmark.id)
+          created.add(node.id)
+          operation.completed++
+          if (operation.completed % 32 === 0) await checkpoint(operation)
+          progress?.(operation.completed, total)
+          if (child.kind === "folder") {
+            ids.set(child.value.id, node.id)
+            await createChildren(child.value.id, node.id)
+          }
         }
+      }
+      await createChildren("", root.id)
     } catch (cause) {
       try {
-        const tree = await chrome.bookmarks.getSubTree(root.id)
+        const tree = root ? await chrome.bookmarks.getSubTree(root.id) : []
         const owned = (node: chrome.bookmarks.BookmarkTreeNode): boolean =>
           created.has(node.id) && (node.children || []).every(owned)
         if (!tree.every(owned))
           throw new Error("Import folder was changed", { cause })
-        await chrome.bookmarks.removeTree(root.id)
+        if (root) await chrome.bookmarks.removeTree(root.id)
+        await finishOperation(operation.id)
       } catch {
         throw new AppError(
           "partial-write",
@@ -301,6 +381,40 @@ export function importBackup(
       throw new AppError("operation", "导入失败，原有书签未变更", { cause })
     }
     await restorePreferences(data, ids, restore)
-    return root.id
+    try {
+      await finishOperation(operation.id)
+    } catch (cause) {
+      throw new AppError("partial-write", "书签已导入，操作记录待检查", {
+        cause,
+      })
+    }
+    return root!.id
   })
+}
+
+export function planJsonImport(text: string): ImportPlan {
+  const issues: ImportIssue[] = []
+  return { data: parseBackup(text, issues), issues, format: "json" }
+}
+
+export function executeImportPlan(
+  plan: ImportPlan,
+  parentId?: string,
+  restore = false,
+  skipped: string[] = [],
+  progress?: (completed: number, total: number) => void
+) {
+  const omit = new Set(skipped)
+  return importBackup(
+    {
+      ...plan.data,
+      groups: plan.data.groups.map((group) => ({
+        ...group,
+        items: group.items.filter((item) => !omit.has(item.id)),
+      })),
+    },
+    parentId,
+    restore,
+    progress
+  )
 }

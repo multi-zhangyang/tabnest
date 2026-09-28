@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -48,10 +49,10 @@ function useManagementState(
     () => new Set(selected.map((i) => i.id)),
     [selected]
   )
-  const clear = () => {
+  const clear = useCallback(() => {
     setActive(false)
     setIds(new Set())
-  }
+  }, [])
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (
@@ -67,89 +68,105 @@ function useManagementState(
     window.addEventListener("keydown", escape)
     return () => window.removeEventListener("keydown", escape)
   }, [])
-  function toggle(item: BookmarkItem) {
-    if (item.readOnly || busy) return
-    setActive(true)
-    setIds((previous) => {
-      const next = new Set(previous)
-      if (next.has(item.id)) next.delete(item.id)
-      else next.add(item.id)
-      return next
-    })
-  }
-  async function move(items: BookmarkItem[], target: MoveTarget) {
-    if (operation.current) return
-    operation.current = true
-    setBusy(true)
-    try {
-      await moveBookmarks(items, target)
-      await onMoved()
-      clear()
-      setMoving(false)
-      toast.success("书签已移动")
-    } finally {
-      operation.current = false
-      setBusy(false)
+  return useMemo(() => {
+    function toggle(item: BookmarkItem) {
+      if (item.readOnly || busy) return
+      setActive(true)
+      setIds((previous) => {
+        const next = new Set(previous)
+        if (next.has(item.id)) next.delete(item.id)
+        else next.add(item.id)
+        return next
+      })
     }
-  }
-  function dragStart(event: DragEvent, item: BookmarkItem) {
-    if (item.readOnly || busy) {
+    async function move(items: BookmarkItem[], target: MoveTarget) {
+      if (operation.current) return
+      operation.current = true
+      setBusy(true)
+      try {
+        await moveBookmarks(items, target)
+        await onMoved()
+        clear()
+        setMoving(false)
+        toast.success("书签已移动")
+      } finally {
+        operation.current = false
+        setBusy(false)
+      }
+    }
+    function dragStart(event: DragEvent, item: BookmarkItem) {
+      if (item.readOnly || busy) {
+        event.preventDefault()
+        return
+      }
+      dragging.current = selectedIds.has(item.id) ? selected : [item]
+      event.dataTransfer.setData(
+        "application/x-tabnest-bookmarks",
+        dragging.current.map((i) => i.id).join(",")
+      )
+      event.dataTransfer.effectAllowed = "move"
+    }
+    function dragOver(event: DragEvent, key: string, readOnly = false) {
+      if (readOnly || busy || !dragging.current.length) return
       event.preventDefault()
-      return
+      event.stopPropagation()
+      event.dataTransfer.dropEffect = "move"
+      setDrop(key)
     }
-    dragging.current = selectedIds.has(item.id) ? selected : [item]
-    event.dataTransfer.setData(
-      "application/x-tabnest-bookmarks",
-      dragging.current.map((i) => i.id).join(",")
-    )
-    event.dataTransfer.effectAllowed = "move"
-  }
-  function dragOver(event: DragEvent, key: string, readOnly = false) {
-    if (readOnly || busy || !dragging.current.length) return
-    event.preventDefault()
-    event.stopPropagation()
-    event.dataTransfer.dropEffect = "move"
-    setDrop(key)
-  }
-  function dropOn(event: DragEvent, target: MoveTarget, readOnly = false) {
-    if (readOnly || !dragging.current.length) return
-    event.preventDefault()
-    event.stopPropagation()
-    const items = dragging.current
-    dragging.current = []
-    setDrop("")
-    void move(items, target).catch((cause) =>
-      toast.error(cause instanceof Error ? cause.message : "移动失败")
-    )
-  }
-  return {
+    function dropOn(event: DragEvent, target: MoveTarget, readOnly = false) {
+      if (readOnly || !dragging.current.length) return
+      event.preventDefault()
+      event.stopPropagation()
+      const items = dragging.current
+      dragging.current = []
+      setDrop("")
+      void move(items, target).catch((cause) =>
+        toast.error(cause instanceof Error ? cause.message : "移动失败")
+      )
+    }
+    return {
+      active,
+      selected,
+      selectedIds,
+      toggle,
+      clear,
+      busy,
+      moving,
+      setMoving,
+      target,
+      setTarget,
+      error,
+      setError,
+      move,
+      drop,
+      dragStart,
+      dragOver,
+      dropOn,
+      dragEnd: () => {
+        dragging.current = []
+        setDrop("")
+      },
+      start: () => setActive(true),
+      selectAll: () =>
+        setIds(new Set(items.filter((i) => !i.readOnly).map((i) => i.id))),
+      remove: () => onDelete(selected),
+      folders,
+    }
+  }, [
     active,
     selected,
     selectedIds,
-    toggle,
-    clear,
     busy,
     moving,
-    setMoving,
     target,
-    setTarget,
     error,
-    setError,
-    move,
     drop,
-    dragStart,
-    dragOver,
-    dropOn,
-    dragEnd: () => {
-      dragging.current = []
-      setDrop("")
-    },
-    start: () => setActive(true),
-    selectAll: () =>
-      setIds(new Set(items.filter((i) => !i.readOnly).map((i) => i.id))),
-    remove: () => onDelete(selected),
     folders,
-  }
+    items,
+    clear,
+    onMoved,
+    onDelete,
+  ])
 }
 type Management = ReturnType<typeof useManagementState>
 const Context = createContext<Management | null>(null)

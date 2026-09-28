@@ -6,8 +6,12 @@ permissions:
   contents: read
 jobs:
   verify:
-    runs-on: windows-latest
-    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -31,6 +35,9 @@ jobs:
       - run: npm run test:extension
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+      - run: npm run test:startup
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
       - run: npm run test:scroll
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
@@ -40,10 +47,38 @@ jobs:
       - run: npm run test:product
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+      - run: npm run test:upgrade
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
       - run: node tools/release.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: tabnest-verification
+          name: tabnest-verification-${{ matrix.os }}
+          path: artifacts/
+          retention-days: 14
+  minimum-chrome:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+      - id: chrome
+        uses: browser-actions/setup-chrome@48483d551c22a1fe6154c6a195ccc6d5773dc8c4
+        with:
+          chrome-version: 114.0.5735.90
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:compatibility
+        env:
+          COMPAT_CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+          COMPAT_EXTENSION: "1"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: tabnest-minimum-chrome
           path: artifacts/
           retention-days: 14

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
 import { readdir, readFile, writeFile, mkdir } from "node:fs/promises"
-import { resolve, relative } from "node:path"
+import { resolve, relative, posix } from "node:path"
 import { gzipSync } from "node:zlib"
 import { zipSync, unzipSync } from "fflate"
 
@@ -67,9 +67,18 @@ assert.ok(
   zip.byteLength < 2 * 1024 * 1024,
   "Extension exceeds 2 MB archive budget"
 )
-const initialJs = [...files]
-  .filter(([name]) => /assets\/index-.*\.js$/.test(name))
-  .reduce((sum, [, bytes]) => sum + gzipSync(bytes).byteLength, 0)
+const initialAssets = new Set()
+function initialImports(name) {
+  if (initialAssets.has(name)) return
+  const bytes = files.get(name)
+  assert.ok(bytes, `Missing initial script ${name}`)
+  initialAssets.add(name)
+  const source = new TextDecoder().decode(bytes)
+  for (const [, imported] of source.matchAll(/(?:from\s*|import\s*)["'](\.[^"']+\.js)["']/g))
+    initialImports(posix.normalize(posix.join(posix.dirname(name), imported)))
+}
+for (const [, source] of html.matchAll(/<script[^>]+src="([^"]+\.js)"/g)) initialImports(source.replace(/^\.\//, ""))
+const initialJs = [...initialAssets].reduce((sum, name) => sum + gzipSync(files.get(name)).byteLength, 0)
 assert.ok(initialJs < 250 * 1024, "Initial JS exceeds 250 KB gzip budget")
 const unpacked = unzipSync(zip)
 assert.equal(Object.keys(unpacked).length, files.size)
@@ -88,6 +97,7 @@ const report = {
   files: files.size,
   archiveBytes: zip.byteLength,
   initialJsGzipBytes: initialJs,
+  initialJsAssets: [...initialAssets],
   sha256,
   archive: filename,
 }

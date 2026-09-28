@@ -22,6 +22,7 @@ export type BookmarkFolder = {
   readOnly?: boolean
   root?: boolean
   folderType?: string
+  index?: number
 }
 
 export type SortKey = "default" | "name"

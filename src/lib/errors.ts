@@ -5,6 +5,7 @@ export type ErrorCode =
   | "conflict"
   | "partial-write"
   | "operation"
+  | "recovery-capacity"
 
 export class AppError extends Error {
   readonly code: ErrorCode

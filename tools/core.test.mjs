@@ -115,7 +115,7 @@ test("all bookmark roots and nested folders retain their own IDs and empty targe
 
 test("preview create, edit, move, delete and empty-folder writes persist across reads", async () => {
   values.clear()
-  const folderId = await repository.createFolder("新分区")
+  const folderId = await repository.createFolder("新文件夹")
   await repository.saveBookmark({
     title: "New",
     url: "example.com",
@@ -455,7 +455,9 @@ test("backup import is additive, preserves hierarchy and rejects malicious or in
   )
   const unsafe = structuredClone(backup)
   unsafe.groups[1].items[0].url = "javascript:alert(1)"
-  assert.throws(() => backupRepository.parseBackup(JSON.stringify(unsafe)))
+  const preserved = backupRepository.parseBackup(JSON.stringify(unsafe))
+  assert.equal(preserved.groups[1].items[0].url, "javascript:alert(1)")
+  assert.equal(repository.safeUrl(preserved.groups[1].items[0].url), undefined)
   const cyclic = structuredClone(backup)
   cyclic.folders[0].parentId = "c"
   assert.throws(
@@ -699,7 +701,7 @@ test("complete backup restores remapped folder preferences, normalized heat and 
   const exported = await backupRepository.createFullBackup(
     await repository.fetchBookmarkData()
   )
-  assert.equal(exported.version, 4)
+  assert.equal(exported.version, 5)
   const parsed = backupRepository.parseBackup(JSON.stringify(exported))
   await repository.saveSettings({ density: "loose" })
   await backupRepository.importBackup(parsed, undefined, true)

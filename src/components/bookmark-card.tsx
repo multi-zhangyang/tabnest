@@ -38,6 +38,7 @@ import { openTarget } from "@/lib/navigation"
 import type { OpenTarget } from "@/lib/navigation"
 import { BookmarkCheckbox, useBookmarkManagement } from "./bookmark-management"
 import type { AppSettings, BookmarkItem } from "@/lib/types"
+import { queryTokens } from "@/lib/search-tokens"
 
 export type BookmarkActions = {
   open: (item: BookmarkItem, target?: OpenTarget) => void
@@ -47,16 +48,32 @@ export type BookmarkActions = {
   move: (item: BookmarkItem, direction: -1 | 1) => void
 }
 
-function Highlight({ text, query }: { text: string; query: string }) {
-  const index = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase())
-  if (!query || index < 0) return text
-  return (
-    <>
-      {text.slice(0, index)}
-      <mark>{text.slice(index, index + query.length)}</mark>
-      {text.slice(index + query.length)}
-    </>
-  )
+export function Highlight({ text, query }: { text: string; query: string }) {
+  const tokens = queryTokens(query)
+  if (!tokens.length) return text
+  const lower = text.toLocaleLowerCase(),
+    matched = new Set<number>()
+  for (const token of tokens) {
+    let index = lower.indexOf(token)
+    while (index >= 0) {
+      for (let i = index; i < index + token.length; i++) matched.add(i)
+      index = lower.indexOf(token, index + Math.max(1, token.length))
+    }
+  }
+  const parts = []
+  let start = 0
+  for (let i = 1; i <= text.length; i++)
+    if (i === text.length || matched.has(i) !== matched.has(start)) {
+      parts.push(
+        matched.has(start) ? (
+          <mark key={start}>{text.slice(start, i)}</mark>
+        ) : (
+          text.slice(start, i)
+        )
+      )
+      start = i
+    }
+  return <>{parts}</>
 }
 
 export function BookmarkCard({
@@ -71,6 +88,7 @@ export function BookmarkCard({
   compact = false,
   tiny = false,
   count = 0,
+  heatSize,
 }: {
   item: BookmarkItem
   settings: AppSettings
@@ -83,11 +101,29 @@ export function BookmarkCard({
   compact?: boolean
   tiny?: boolean
   count?: number
+  heatSize?: { width: number; height: number }
 }) {
   const anchor = useRef<HTMLAnchorElement>(null)
+  const navigableUrl = safeUrl(item.url)
   const management = useBookmarkManagement()
   const [previewOpen, setPreviewOpen] = useState(false)
   const previous = useRef(count)
+  const [presentation, setPresentation] = useState<"icon" | "title" | "full">(
+    "full"
+  )
+  if (heatSize) {
+    const edge = Math.min(heatSize.width, heatSize.height),
+      area = heatSize.width * heatSize.height
+    const iconThreshold = presentation === "icon" ? 88 : 72
+    const fullThreshold = presentation === "full" ? 18000 : 22000
+    const next =
+      edge < iconThreshold || area < 6200
+        ? "icon"
+        : area < fullThreshold || edge < 104
+          ? "title"
+          : "full"
+    if (next !== presentation) setPresentation(next)
+  }
   useEffect(() => {
     if (
       count > previous.current &&
@@ -98,7 +134,7 @@ export function BookmarkCard({
           { boxShadow: "0 0 0 2px var(--ring)" },
           { boxShadow: "0 0 0 0 transparent" },
         ],
-        { duration: 360, easing: "ease-out" }
+        { duration: 160, easing: "ease-out" }
       )
     }
     previous.current = count
@@ -110,6 +146,14 @@ export function BookmarkCard({
       management.toggle(item)
       return
     }
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
+      anchor.current?.animate(
+        [
+          { boxShadow: "0 0 0 2px var(--ring)" },
+          { boxShadow: "0 0 0 0 transparent" },
+        ],
+        { duration: 160 }
+      )
     actions.open(item, openTarget(event, settings.newTab))
   }
   return (
@@ -142,7 +186,14 @@ export function BookmarkCard({
             <HoverCardTrigger asChild>
               <a
                 ref={anchor}
-                href={safeUrl(item.url)}
+                href={navigableUrl}
+                role={navigableUrl ? undefined : "button"}
+                onKeyDown={(event) => {
+                  if (!navigableUrl && ["Enter", " "].includes(event.key)) {
+                    event.preventDefault()
+                    actions.copy(item.url)
+                  }
+                }}
                 onClick={activate}
                 onAuxClick={(event) => {
                   if (event.button === 1) {
@@ -152,7 +203,7 @@ export function BookmarkCard({
                   }
                 }}
                 target={settings.newTab ? "_blank" : undefined}
-                tabIndex={management?.active ? -1 : undefined}
+                tabIndex={management?.active ? -1 : 0}
                 rel="noopener noreferrer"
                 data-bookmark-id={item.id}
                 data-clicks={count}
@@ -160,6 +211,12 @@ export function BookmarkCard({
                 data-selected={selected || undefined}
                 data-compact={compact || undefined}
                 data-tiny={tiny || undefined}
+                data-presentation={heat ? presentation : undefined}
+                onFocus={() => {
+                  if (heat && presentation === "icon" && !management?.active)
+                    setPreviewOpen(true)
+                }}
+                onBlur={() => setPreviewOpen(false)}
                 className={cn(
                   "bookmark-card",
                   heat && "heat-card",
@@ -195,7 +252,8 @@ export function BookmarkCard({
                 aria-label={`${item.title} · ${domainOf(item.url)}`}
               >
                 <Card className="bookmark-surface">
-                  {settings.iconMode === "favicon" && (
+                  {(settings.iconMode === "favicon" ||
+                    (heat && presentation === "icon")) && (
                     <CardContent className="bookmark-icon">
                       <Favicon
                         url={item.url}
@@ -242,7 +300,10 @@ export function BookmarkCard({
         </HoverCard>
         <ContextMenuContent className="w-48">
           <ContextMenuGroup>
-            <ContextMenuItem onSelect={() => actions.open(item, "foreground")}>
+            <ContextMenuItem
+              disabled={!navigableUrl}
+              onSelect={() => actions.open(item, "foreground")}
+            >
               <ExternalLink />
               在新标签页打开
             </ContextMenuItem>

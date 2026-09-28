@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import axe from "axe-core"
 import { AxePuppeteer } from "@axe-core/puppeteer"
 import { launchBrowser } from "./runtime.mjs"
+import { openSearch } from "./search-helpers.mjs"
 
 const browser = await launchBrowser({ pipe: true, enableExtensions: true })
 const checks = [],
@@ -81,10 +82,10 @@ try {
     ),
     false
   )
-  await page.locator('[aria-label="搜索书签"]').fill("开发 Alpha")
+  await openSearch(page, "开发 Alpha")
   await page.waitForFunction(
     () =>
-      document.querySelectorAll(".search-results .bookmark-card").length === 1
+      document.querySelectorAll('.search-dialog [data-value^="bookmark:"]').length === 1
   )
   await page.evaluate(() => {
     window.__openedBefore = 0
@@ -233,8 +234,8 @@ try {
   assert.equal(await page.$$(".recovery-row").then((rows) => rows.length), 0)
   checks.push("native-batch-delete-reload-restore-preserves-order")
   await page.keyboard.press("Escape")
-  await page.locator('[aria-label="搜索书签"]').fill("目标文件夹")
-  await click(`${fixture.rootTitle} / 目标文件夹`, ".folder-results button")
+  await openSearch(page, "目标文件夹")
+  await click(`${fixture.rootTitle} / 目标文件夹`, '.search-dialog [data-value^="folder:"]')
   assert.equal(
     await page.$eval(
       `[data-folder-id="${fixture.target}"]`,
@@ -321,7 +322,7 @@ try {
   await click("导出完整备份")
   await page.waitForFunction(() => window.__backup)
   const backup = JSON.parse(await page.evaluate(() => window.__backup))
-  assert.equal(backup.version, 4)
+  assert.equal(backup.version, 5)
   assert.equal(backup.preferences.theme, "light")
   assert.equal(backup.preferences.clicks["https://example.com/alpha"], 3)
   await mkdir("artifacts", { recursive: true })
@@ -353,10 +354,10 @@ try {
   assert.equal(restored.clicks["https://example.com/alpha"], 3)
   assert.equal(
     await page.$$eval(".section-bookmarks .bookmark-card", (els) => els.length),
-    8
+    backup.groups.reduce((sum, group) => sum + group.items.length, 0) * 2
   )
   checks.push("complete-backup-native-export-import-remaps-folder-preferences")
-  await page.locator('[aria-label="热度云图"]').click()
+  await page.locator('[aria-label="书签拼图"]').click()
   await delay(300)
   const positions = () =>
     page.$$eval(".heat-card", (els) =>
@@ -402,7 +403,7 @@ try {
   checks.push("narrow-selection-toolbar-bounds")
   await page.setViewport({ width: 1440, height: 900 })
   await page.locator('[aria-label="退出多选"]').click()
-  await page.locator('[aria-label="分区视图"]').click()
+  await page.locator('[aria-label="文件夹视图"]').click()
   await mkdir("artifacts", { recursive: true })
   await page.screenshot({ path: "artifacts/product-sections.png" })
   assert.deepEqual(errors, [])

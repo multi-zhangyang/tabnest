@@ -1,6 +1,26 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react"
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
 import type { CSSProperties } from "react"
-import { Bookmark, Folder, Search, X } from "lucide-react"
+import {
+  Bookmark,
+  Folder,
+  Search,
+  X,
+  Plus,
+  FolderPlus,
+  Upload,
+  Download,
+  BarChart3,
+  Settings2,
+  RotateCcw,
+  Copy,
+} from "lucide-react"
 import {
   BookmarkManagement,
   SelectionTrigger,
@@ -29,6 +49,8 @@ import { useLibraryActions } from "@/hooks/use-library-actions"
 import { defaultFolderId } from "@/lib/bookmarks"
 import { descendants, rootFolder } from "@/lib/folders"
 import type { LayoutMode } from "@/lib/types"
+import { loadPendingOperations } from "@/lib/operations"
+import { toast } from "sonner"
 
 const SettingsDialog = lazy(() =>
   import("@/components/settings-dialog").then((module) => ({
@@ -37,12 +59,15 @@ const SettingsDialog = lazy(() =>
 )
 const StatsDialog = lazy(() => import("@/components/stats-dialog"))
 const RecoveryDialog = lazy(() => import("@/components/recovery-dialog"))
+const SearchDialog = lazy(() => import("@/components/search-dialog"))
+const DuplicateDialog = lazy(() => import("@/components/duplicate-dialog"))
 
 export default function App() {
   const {
     groups,
     folders,
     settings,
+    settingsReady,
     patchSettings,
     clicks,
     recordClick,
@@ -52,8 +77,25 @@ export default function App() {
     retry,
   } = useBookmarks()
   const [utility, setUtility] = useState<
-    "settings" | "stats" | "recovery" | null
+    "settings" | "stats" | "recovery" | "duplicates" | null
   >(null)
+  useEffect(() => {
+    let alive = true
+    void loadPendingOperations()
+      .then((records) => {
+        if (alive && records.length)
+          toast("有待检查的导入或恢复", {
+            duration: Infinity,
+            action: { label: "查看", onClick: () => setUtility("recovery") },
+          })
+      })
+      .catch(() => {
+        if (alive) toast.error("操作记录读取失败")
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
   const library = useLibraryActions({
     data: { groups, folders },
     settings,
@@ -76,6 +118,18 @@ export default function App() {
   const showGroups =
     !search.active && settings.layout === "zones" && !!folders.length
   const [located, setLocated] = useState("")
+  function locateFolder(id: string) {
+    setUtility(null)
+    patchSettings({
+      layout: "zones",
+      activeFolderId: id,
+      collapsedSections: settings.collapsedSections.filter(
+        (value) => value !== id
+      ),
+    })
+    setLocated(id)
+    search.clear()
+  }
   useEffect(() => {
     if (!located || !showGroups) return
     const frame = requestAnimationFrame(() => {
@@ -88,12 +142,23 @@ export default function App() {
     return () => cancelAnimationFrame(frame)
   }, [located, showGroups, settings.activeFolderId])
   const manageableItems = useMemo(() => {
-    if (search.active) return search.results
+    if (search.active) return search.pageResults
     if (!showGroups || !activeRoot) return items
     const ids = descendants(folders, activeRoot.id)
     return items.filter((item) => ids.has(item.parentId || ""))
-  }, [search.active, search.results, showGroups, activeRoot, folders, items])
+  }, [
+    search.active,
+    search.pageResults,
+    showGroups,
+    activeRoot,
+    folders,
+    items,
+  ])
   const canvasStyle = { "--card-scale": settings.cardScale } as CSSProperties
+  const onMoved = useCallback(async () => {
+    patchSettings({ sort: "default" })
+    await reload()
+  }, [patchSettings, reload])
 
   return (
     <TooltipProvider delayDuration={350}>
@@ -101,13 +166,10 @@ export default function App() {
         items={manageableItems}
         folders={folders}
         onDelete={library.deleteMany}
-        onMoved={async () => {
-          patchSettings({ sort: "default" })
-          await reload()
-        }}
+        onMoved={onMoved}
       >
         <Tabs
-          value={settings.layout}
+          value={settingsReady ? settings.layout : ""}
           onValueChange={(layout) => {
             patchSettings({ layout: layout as LayoutMode })
             search.clear()
@@ -118,6 +180,7 @@ export default function App() {
           style={canvasStyle}
         >
           <AppHeader
+            ready={settingsReady}
             search={search}
             onAdd={() => library.add(activeRoot?.id)}
             onNewFolder={() => library.editFolder({ parentId: activeRoot?.id })}
@@ -128,15 +191,18 @@ export default function App() {
             }
           />
           <main className="view-panel">
-            <TabsContent value={settings.layout} className="main-content">
+            <TabsContent
+              value={settingsReady ? settings.layout : ""}
+              className="main-content"
+            >
               <h1 className="sr-only">
                 {search.active
                   ? "搜索书签"
                   : settings.layout === "heat"
-                    ? "热度云图"
-                    : "书签分区"}
+                    ? "书签拼图"
+                    : "书签文件夹"}
               </h1>
-              {!showGroups && (
+              {!loading && !showGroups && (
                 <div className="collection-toolbar">
                   <div className="collection-summary">
                     {search.active ? (
@@ -145,7 +211,7 @@ export default function App() {
                           {search.duplicatesOnly ? "重复书签" : "搜索结果"}
                         </span>
                         <Badge variant="secondary">
-                          {search.results.length}
+                          {search.pageResults.length}
                         </Badge>
                       </>
                     ) : (
@@ -164,6 +230,7 @@ export default function App() {
                           variant="ghost"
                           size="sm"
                           onClick={search.clear}
+                          aria-label="清空搜索"
                         >
                           <X data-icon="inline-start" />
                           返回书签
@@ -199,75 +266,73 @@ export default function App() {
                   actions={library.actions}
                   onFolderEdit={library.editFolder}
                   onFolderDelete={library.deleteFolder}
-                  onAdd={library.add}
                   onOpenGroup={library.openGroup}
                 />
-              ) : !search.results.length && !search.folderResults.length ? (
+              ) : search.active ? (
+                !search.pageResults.length && !search.pageFolders.length ? (
+                  <Empty className="empty-bookmarks">
+                    <EmptyHeader>
+                      <EmptyMedia variant="icon">
+                        {search.active ? <Search /> : <Bookmark />}
+                      </EmptyMedia>
+                      <EmptyTitle>
+                        {search.duplicatesOnly
+                          ? "没有重复书签"
+                          : search.active
+                            ? "没有匹配的书签"
+                            : "还没有书签"}
+                      </EmptyTitle>
+                    </EmptyHeader>
+                  </Empty>
+                ) : (
+                  <>
+                    {!!search.pageFolders.length && (
+                      <div className="folder-results" aria-label="匹配的文件夹">
+                        {search.pageFolders.map((folder) => (
+                          <Button
+                            key={folder.id}
+                            variant="outline"
+                            size="sm"
+                            title={folder.path}
+                            onClick={() => {
+                              patchSettings({
+                                layout: "zones",
+                                activeFolderId: folder.id,
+                                collapsedSections:
+                                  settings.collapsedSections.filter(
+                                    (id) => id !== folder.id
+                                  ),
+                              })
+                              setLocated(folder.id)
+                              search.clear()
+                            }}
+                          >
+                            <Folder data-icon="inline-start" />
+                            <span className="truncate">{folder.path}</span>
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                    <BookmarkResults
+                      items={search.pageResults}
+                      folders={folders}
+                      settings={settings}
+                      clicks={clicks}
+                      actions={library.actions}
+                      query={search.pageQuery.trim()}
+                      selected={search.selected}
+                    />
+                  </>
+                )
+              ) : !items.length ? (
                 <Empty className="empty-bookmarks">
                   <EmptyHeader>
                     <EmptyMedia variant="icon">
-                      {search.active ? <Search /> : <Bookmark />}
+                      <Bookmark />
                     </EmptyMedia>
-                    <EmptyTitle>
-                      {search.duplicatesOnly
-                        ? "没有重复书签"
-                        : search.active
-                          ? "没有匹配的书签"
-                          : "还没有书签"}
-                    </EmptyTitle>
+                    <EmptyTitle>还没有书签</EmptyTitle>
                   </EmptyHeader>
-                  <EmptyContent>
-                    <Button
-                      variant="outline"
-                      onClick={() =>
-                        search.active
-                          ? search.clear()
-                          : library.add(activeRoot?.id)
-                      }
-                    >
-                      {search.active ? "返回书签" : "添加书签"}
-                    </Button>
-                  </EmptyContent>
                 </Empty>
-              ) : search.active ? (
-                <>
-                  {!!search.folderResults.length && (
-                    <div className="folder-results" aria-label="匹配的文件夹">
-                      {search.folderResults.map((folder) => (
-                        <Button
-                          key={folder.id}
-                          variant="outline"
-                          size="sm"
-                          title={folder.path}
-                          onClick={() => {
-                            patchSettings({
-                              layout: "zones",
-                              activeFolderId: folder.id,
-                              collapsedSections:
-                                settings.collapsedSections.filter(
-                                  (id) => id !== folder.id
-                                ),
-                            })
-                            setLocated(folder.id)
-                            search.clear()
-                          }}
-                        >
-                          <Folder data-icon="inline-start" />
-                          <span className="truncate">{folder.path}</span>
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-                  <BookmarkResults
-                    items={search.results}
-                    folders={folders}
-                    settings={settings}
-                    clicks={clicks}
-                    actions={library.actions}
-                    query={search.query.trim()}
-                    selected={search.selected}
-                  />
-                </>
               ) : (
                 <HeatMap
                   items={items}
@@ -279,6 +344,74 @@ export default function App() {
             </TabsContent>
           </main>
           <Suspense fallback={null}>
+            {search.paletteOpen && (
+              <SearchDialog
+                search={search}
+                folders={folders}
+                onOpen={library.actions.open}
+                onLocate={locateFolder}
+                actions={[
+                  {
+                    id: "new",
+                    label: "新建书签",
+                    icon: Plus,
+                    run: () => library.add(activeRoot?.id),
+                    disabled: !activeRoot || activeRoot.readOnly,
+                  },
+                  {
+                    id: "folder",
+                    label: "新建文件夹",
+                    icon: FolderPlus,
+                    run: () => library.editFolder({ parentId: activeRoot?.id }),
+                    disabled: !activeRoot || activeRoot.readOnly,
+                  },
+                  {
+                    id: "import",
+                    label: "导入书签",
+                    icon: Upload,
+                    run: library.importBookmarks,
+                  },
+                  {
+                    id: "export",
+                    label: "导出书签",
+                    icon: Download,
+                    run: library.exportBookmarks,
+                  },
+                  {
+                    id: "duplicates",
+                    label: "重复书签",
+                    icon: Copy,
+                    run: () => setUtility("duplicates"),
+                  },
+                  {
+                    id: "stats",
+                    label: "统计",
+                    icon: BarChart3,
+                    run: () => setUtility("stats"),
+                  },
+                  {
+                    id: "settings",
+                    label: "设置",
+                    icon: Settings2,
+                    run: () => setUtility("settings"),
+                  },
+                  {
+                    id: "recovery",
+                    label: "最近删除",
+                    icon: RotateCcw,
+                    run: () => setUtility("recovery"),
+                  },
+                ]}
+              />
+            )}
+            {utility === "duplicates" && (
+              <DuplicateDialog
+                items={items}
+                folders={folders}
+                onClose={() => setUtility(null)}
+                onDelete={library.deleteMany}
+              />
+            )}
             {utility === "settings" && (
               <SettingsDialog
                 open
@@ -293,6 +426,7 @@ export default function App() {
                 }}
                 onExport={library.exportBookmarks}
                 onFullExport={library.exportFullBackup}
+                onHtmlExport={library.exportHtml}
                 onRecovery={() => setUtility("recovery")}
               />
             )}
@@ -303,8 +437,7 @@ export default function App() {
                 onOpen={library.actions.open}
                 onClose={() => setUtility(null)}
                 onDuplicates={() => {
-                  setUtility(null)
-                  search.showDuplicates()
+                  setUtility("duplicates")
                 }}
               />
             )}
@@ -312,6 +445,7 @@ export default function App() {
               <RecoveryDialog
                 onClose={() => setUtility(null)}
                 onRestored={reload}
+                onLocate={locateFolder}
               />
             )}
           </Suspense>

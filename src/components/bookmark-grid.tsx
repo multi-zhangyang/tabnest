@@ -23,7 +23,7 @@ export function BookmarkGrid({
   const [focus, setFocus] = useState(-1)
   const pending = useRef(-1)
   useLayoutEffect(() => {
-    if (!virtual || !ref.current) return
+    if (!ref.current) return
     const element = ref.current
     const measure = () => {
       const style = getComputedStyle(element)
@@ -108,8 +108,15 @@ export function BookmarkGrid({
       }}
       onKeyDown={(event) => {
         if (
-          !virtual ||
-          event.key !== "Tab" ||
+          ![
+            "Tab",
+            "Home",
+            "End",
+            "ArrowDown",
+            "ArrowUp",
+            "ArrowLeft",
+            "ArrowRight",
+          ].includes(event.key) ||
           !(event.target as HTMLElement).matches(
             "a[data-bookmark-id], .bookmark-checkbox"
           )
@@ -120,7 +127,20 @@ export function BookmarkGrid({
             "[data-grid-index]"
           )?.dataset.gridIndex
         )
-        const next = index + (event.shiftKey ? -1 : 1)
+        const next =
+          event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? items.length - 1
+              : index +
+                (event.key === "ArrowDown"
+                  ? metrics.columns
+                  : event.key === "ArrowUp"
+                    ? -metrics.columns
+                    : event.key === "ArrowLeft" ||
+                        (event.key === "Tab" && event.shiftKey)
+                      ? -1
+                      : 1)
         if (next < 0 || next >= items.length) return
         event.preventDefault()
         pending.current = next

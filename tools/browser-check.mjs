@@ -4,6 +4,7 @@ import { AxePuppeteer } from "@axe-core/puppeteer"
 import assert from "node:assert/strict"
 import { mkdir, writeFile } from "node:fs/promises"
 import { sectionFixture } from "./section-fixture.mjs"
+import { showSearchResults } from "./search-helpers.mjs"
 
 const preview = await servePreview()
 const browser = await launchBrowser()
@@ -203,6 +204,7 @@ try {
   await page.keyboard.down("Control")
   await page.keyboard.press("k")
   await page.keyboard.up("Control")
+  await page.waitForSelector('[aria-label="搜索书签"]')
   assert.equal(
     await page.$eval(
       '[aria-label="搜索书签"]',
@@ -212,15 +214,15 @@ try {
   )
   await page.keyboard.type("GitHub")
   await page.waitForFunction(
-    () => document.querySelectorAll(".bookmark-card").length === 1
+    () => document.querySelectorAll('.search-dialog [data-value^="bookmark:"]').length === 1
   )
   await page.keyboard.press("ArrowDown")
   assert.equal(
     await page.$$eval('[data-selected="true"]', (els) => els.length),
     1
   )
-  assert.ok(await page.$(".search-results"))
-  assert.equal(await page.$(".heat-card"), null)
+  assert.ok(await page.$(".search-dialog"))
+  assert.ok(await page.$(".heat-card"))
   await shot("search")
   await page.keyboard.press("Escape")
   await newBookmark()
@@ -239,7 +241,7 @@ try {
   await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
   await page.reload({ waitUntil: "networkidle0" })
   assert.equal(await page.$$eval(".heat-card", (els) => els.length), 25)
-  await page.type('[aria-label="搜索书签"]', "Refactor test")
+  await showSearchResults(page, "Refactor test")
   await page.waitForFunction(
     () => document.querySelectorAll(".bookmark-card").length === 1
   )
@@ -253,7 +255,7 @@ try {
   await page.keyboard.type("Updated bookmark")
   await click('[role="dialog"] button', "保存")
   await aria("清空搜索")
-  await page.type('[aria-label="搜索书签"]', "Updated bookmark")
+  await showSearchResults(page, "Updated bookmark")
   await page.waitForFunction(
     () => document.querySelectorAll(".bookmark-card").length === 1
   )
@@ -293,7 +295,7 @@ try {
   )
   await shot("statistics")
   await page.keyboard.press("Escape")
-  await aria("分区视图")
+  await aria("文件夹视图")
   await page.waitForSelector(".section-board")
   assert.equal(
     await page.$$eval(".section-bookmarks .bookmark-card", (els) => els.length),
@@ -345,18 +347,18 @@ try {
   await aria("新建")
   await click('[role="menuitem"]', "新建文件夹")
   await page.waitForSelector("#folder-title")
-  await page.type("#folder-title", "验收分区")
+  await page.type("#folder-title", "验收文件夹")
   await click('[role="dialog"] button', "保存")
   await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
-  await aria("分区视图")
+  await aria("文件夹视图")
   assert.ok(
     await page.evaluate(() =>
       [...document.querySelectorAll(".section-slot")].some((el) =>
-        el.textContent.includes("验收分区")
+        el.textContent.includes("验收文件夹")
       )
     )
   )
-  await aria("验收分区文件夹操作")
+  await aria("验收文件夹文件夹操作")
   await click('[role="menuitem"]', "重命名")
   await page.$eval("#folder-title", (el) => {
     el.focus()
@@ -373,7 +375,7 @@ try {
   await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
   assert.equal(
     await page.$eval(
-      '[aria-label$="验收重命名分区"] .section-path',
+      '[aria-label$="验收重命名文件夹"] .section-path',
       (el) => el.textContent
     ),
     "书签栏 / 开发工具"
@@ -438,35 +440,16 @@ try {
   await aria("统计")
   await page.waitForSelector(".metric-grid button")
   await page.click(".metric-grid button")
-  await page.waitForSelector(".search-results")
-  assert.equal(
-    await page.$$eval(".search-results .bookmark-card", (els) => els.length),
-    48
-  )
-  assert.equal(await page.$(".heat-card"), null)
+  await page.waitForSelector(".duplicates-dialog")
+  assert.equal(await page.$$eval(".duplicate-row", els => els.length), 48)
   await shot("duplicate-bookmarks")
-  const duplicateCards = await page.$$(".search-results .bookmark-card")
-  await duplicateCards.at(-1).click({ button: "right" })
-  await click('[role="menuitem"]', "删除书签")
+  await click(".duplicates-dialog button", "删除 24 项")
   await click('[role="alertdialog"] button', "删除")
-  await page.waitForFunction(
-    () =>
-      document.querySelectorAll(".search-results .bookmark-card").length === 46
-  )
-  await page.focus('[aria-label="搜索书签"]')
-  await page.keyboard.press("End")
-  assert.equal(
-    await page.$$eval('[data-selected="true"]', (els) => els.length),
-    1
-  )
-  await click(".collection-actions button", "返回书签")
-  checks.push({
-    name: "duplicate-review",
-    matchesBefore: 48,
-    matchesAfter: 46,
-    deletedBookmarks: 1,
-    originalHierarchyPreserved: true,
-  })
+  await page.waitForFunction(() => !document.querySelector('[role="alertdialog"]'))
+  const remaining = await page.evaluate(() => JSON.parse(localStorage.getItem("tabnest:demo-bookmarks:v2")).data.groups.flatMap(group => group.items))
+  assert.equal(remaining.length, 24)
+  assert.equal(new Set(remaining.map(item => item.url)).size, 24)
+  checks.push({ name: "duplicate-review", matchesBefore: 48, matchesAfter: 0, deletedBookmarks: 24, originalHierarchyPreserved: true })
   await page.evaluate(() => {
     const items = Array.from({ length: 180 }, (_, index) => ({
       id: `bulk-${index}`,
@@ -494,7 +477,7 @@ try {
   assert.deepEqual(bulk.contentOverflows, [])
   assert.equal(await page.$('[aria-label="下一页"]'), null)
   await shot("heat-dense")
-  await page.type('[aria-label="搜索书签"]', "第179项")
+  await showSearchResults(page, "第179项")
   await page.waitForFunction(
     () => document.querySelectorAll(".bookmark-card").length === 1
   )
@@ -519,7 +502,7 @@ try {
   assert.equal(await page.$(".folder-sidebar"), null)
   assert.equal(await page.$(".heat-card"), null)
   assert.equal(
-    await page.evaluate(() => document.body.textContent.includes("所有分区")),
+    await page.evaluate(() => document.body.textContent.includes("所有文件夹")),
     false
   )
   const displayedGroups = await page.$$eval(".section-slot", (sections) =>
@@ -631,7 +614,7 @@ try {
     JSON.stringify(sectionAccessibility.violations)
   )
   await toggleTheme()
-  await aria("分区列表")
+  await aria("文件夹列表")
   assert.equal((await sectionGeometry()).overlaps, 0)
   assert.deepEqual((await sectionGeometry()).overflows, [])
   await shot("sections-list")
@@ -639,7 +622,7 @@ try {
     '[data-folder-id="folder-ai"] .section-card',
     (el) => el.offsetHeight
   )
-  await aria("收起分区 AI-Space")
+  await aria("收起文件夹 AI-Space")
   await page.reload({ waitUntil: "networkidle0" })
   await page.waitForSelector('.section-board[data-layout="list"]')
   assert.equal(
@@ -657,8 +640,8 @@ try {
       beforeCollapse / 2
   )
   assert.equal((await sectionGeometry()).overlaps, 0)
-  await aria("展开分区 AI-Space")
-  await aria("分区网格")
+  await aria("展开文件夹 AI-Space")
+  await aria("文件夹网格")
   await page
     .locator('.section-toolbar [role="tab"][data-state="inactive"]')
     .click()

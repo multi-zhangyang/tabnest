@@ -1,5 +1,6 @@
 import { useLayoutEffect, useState } from "react"
 import type { RefObject } from "react"
+import { subscribeViewport } from "@/lib/viewport"
 
 export function useVisibleCanvas(
   ref: RefObject<HTMLElement | null>,
@@ -24,15 +25,12 @@ export function useVisibleCanvas(
     }
     update()
     const observer = new ResizeObserver(schedule)
-    observer.observe(document.body)
     if (ref.current) observer.observe(ref.current)
-    window.addEventListener("scroll", schedule, { passive: true })
-    window.addEventListener("resize", schedule)
+    const unsubscribe = subscribeViewport(update)
     return () => {
       cancelAnimationFrame(frame)
       observer.disconnect()
-      window.removeEventListener("scroll", schedule)
-      window.removeEventListener("resize", schedule)
+      unsubscribe()
     }
   }, [ref, enabled])
   return range

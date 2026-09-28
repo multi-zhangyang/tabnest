@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import type { KeyboardEvent } from "react"
 import { sortItems } from "@/lib/bookmarks"
 import { indexBookmarkUrls } from "@/lib/bookmark-index"
-import { createSearchIndex, searchBookmarks, queryTokens } from "@/lib/search"
+import { searchLibrary, warmSearch } from "@/lib/search-service"
 import { isComposing, openTarget } from "@/lib/navigation"
 import type { OpenTarget } from "@/lib/navigation"
 import type { BookmarkFolder, BookmarkItem, SortKey } from "@/lib/types"
@@ -14,23 +14,47 @@ export function useBookmarkSearch(
   onOpen: (item: BookmarkItem, target?: OpenTarget) => void
 ) {
   const [query, setQuery] = useState("")
+  const [pageQuery, setPageQuery] = useState("")
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [matches, setMatches] = useState(items)
+  const [folderResults, setFolderResults] = useState<BookmarkFolder[]>([])
+  const [pending, setPending] = useState(false)
+  const [pageResults, setPageResults] = useState(items)
+  const [pageFolders, setPageFolders] = useState<BookmarkFolder[]>([])
   const [duplicatesOnly, setDuplicatesOnly] = useState(false)
   const [selection, setSelection] = useState(-1)
   const inputRef = useRef<HTMLInputElement>(null)
-  const index = useMemo(
-    () => createSearchIndex(items, folders),
-    [items, folders]
-  )
-  const folderResults = useMemo(() => {
-    const tokens = queryTokens(query)
-    return !tokens.length || duplicatesOnly
-      ? []
-      : folders.filter((folder) =>
-          tokens.every((token) =>
-            folder.path.normalize("NFKC").toLocaleLowerCase().includes(token)
-          )
-        )
-  }, [folders, query, duplicatesOnly])
+  const previousScroll = useRef(0)
+  useEffect(() => {
+    if (!items.length && !folders.length) return
+    const timer = setTimeout(() => {
+      void warmSearch(items, folders).catch(() => {})
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [items, folders])
+  useEffect(() => {
+    let current = true
+    void Promise.resolve().then(() => {
+      if (current) setPending(!!query.trim())
+    })
+    void searchLibrary(items, folders, query)
+      .then((results) => {
+        if (current) {
+          setMatches(results.items)
+          setFolderResults(results.folders)
+          setPending(false)
+        }
+      })
+      .catch(() => {
+        if (current) {
+          setMatches([])
+          setPending(false)
+        }
+      })
+    return () => {
+      current = false
+    }
+  }, [items, folders, query])
   const results = useMemo(() => {
     const duplicateIds = duplicatesOnly
       ? new Set(
@@ -39,15 +63,36 @@ export function useBookmarkSearch(
             .flatMap((matches) => matches.map((item) => item.id))
         )
       : null
-    const matches = searchBookmarks(index, query).filter(
+    const found = (query.trim() ? matches : items).filter(
       (item) => !duplicateIds || duplicateIds.has(item.id)
     )
-    return sort === "name" || !query.trim() ? sortItems(matches, sort) : matches
-  }, [items, index, sort, query, duplicatesOnly])
+    return sort === "name" || !query.trim() ? sortItems(found, sort) : found
+  }, [items, matches, sort, query, duplicatesOnly])
   const selected = Math.min(selection, results.length - 1)
-  const active = !!query.trim() || duplicatesOnly
+  useEffect(() => {
+    if (paletteOpen || pending || query !== pageQuery) return
+    void Promise.resolve().then(() => {
+      setPageResults(results)
+      setPageFolders(folderResults)
+    })
+  }, [paletteOpen, pending, results, folderResults, query, pageQuery])
+  const active = !!pageQuery.trim() || duplicatesOnly
   function clear() {
+    if (pageQuery) {
+      const top = previousScroll.current
+      let attempts = 0
+      const restore = () => {
+        if (
+          document.documentElement.scrollHeight - innerHeight < top &&
+          ++attempts < 30
+        )
+          requestAnimationFrame(restore)
+        else window.scrollTo({ top, behavior: "instant" })
+      }
+      requestAnimationFrame(restore)
+    }
     setQuery("")
+    setPageQuery("")
     setDuplicatesOnly(false)
     setSelection(-1)
   }
@@ -59,8 +104,7 @@ export function useBookmarkSearch(
         !document.querySelector('[role="dialog"], [role="alertdialog"]')
       ) {
         event.preventDefault()
-        inputRef.current?.focus()
-        inputRef.current?.select()
+        setPaletteOpen(true)
       }
     }
     window.addEventListener("keydown", shortcut)
@@ -106,6 +150,30 @@ export function useBookmarkSearch(
   }
   return {
     query,
+    pageQuery,
+    paletteOpen,
+    pending,
+    openPalette: () => {
+      setQuery(pageQuery)
+      setPaletteOpen(true)
+    },
+    closePalette: () => {
+      setQuery(pageQuery)
+      setPaletteOpen(false)
+    },
+    showAll: () => {
+      if (!pageQuery) previousScroll.current = scrollY
+      setPageQuery(query)
+      setPageResults(results)
+      setPageFolders(folderResults)
+      setPaletteOpen(false)
+      setSelection(-1)
+      requestAnimationFrame(() =>
+        window.scrollTo({ top: 0, behavior: "instant" })
+      )
+    },
+    pageResults,
+    pageFolders,
     active,
     duplicatesOnly,
     results,

@@ -29,6 +29,7 @@ export function SettingsDialog({
   onImport,
   onExport,
   onFullExport,
+  onHtmlExport,
   onRecovery,
 }: {
   open: boolean
@@ -38,6 +39,7 @@ export function SettingsDialog({
   onImport: () => void
   onExport: () => void
   onFullExport: () => void
+  onHtmlExport: () => void
   onRecovery: () => void
 }) {
   const { theme, setTheme } = useTheme()
@@ -210,6 +212,10 @@ export function SettingsDialog({
                     <Button variant="outline" onClick={onFullExport}>
                       <Download data-icon="inline-start" />
                       导出完整备份
+                    </Button>
+                    <Button variant="outline" onClick={onHtmlExport}>
+                      <Download data-icon="inline-start" />
+                      HTML 书签
                     </Button>
                     <Button variant="outline" onClick={onRecovery}>
                       最近删除

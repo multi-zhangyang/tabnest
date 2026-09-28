@@ -1,22 +1,15 @@
 import {
   BarChart3,
   FolderPlus,
-  Grid2X2,
+  Folders,
   PanelsTopLeft,
   Plus,
   Search,
   Settings2,
-  X,
 } from "lucide-react"
 import type { BookmarkSearch } from "@/hooks/use-bookmark-search"
 import { Button } from "@/components/ui/button"
 import { TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/components/ui/input-group"
 import { Kbd } from "@/components/ui/kbd"
 import {
   DropdownMenu,
@@ -32,6 +25,7 @@ import {
 } from "@/components/ui/tooltip"
 
 export function AppHeader({
+  ready,
   search,
   onAdd,
   onNewFolder,
@@ -39,6 +33,7 @@ export function AppHeader({
   onSettings,
   writable,
 }: {
+  ready: boolean
   search: BookmarkSearch
   onAdd: () => void
   onNewFolder: () => void
@@ -46,7 +41,7 @@ export function AppHeader({
   onSettings: () => void
   writable: boolean
 }) {
-  const { inputRef, query, active, onKeyDown, clear, change } = search
+  const { clear } = search
   return (
     <header className="app-header">
       <a
@@ -67,49 +62,37 @@ export function AppHeader({
         />
         <span>TabNest</span>
       </a>
-      <nav className="main-tabs" aria-label="书签视图">
-        <TabsList aria-label="主导航">
-          <TabsTrigger value="heat" aria-label="热度云图">
+      <nav
+        className="main-tabs"
+        aria-label="书签视图"
+        aria-busy={!ready}
+        data-ready={ready}
+      >
+        <TabsList key={ready ? "ready" : "pending"} aria-label="主导航">
+          <TabsTrigger value="heat" aria-label="书签拼图">
             <PanelsTopLeft data-icon="inline-start" />
-            热度云图
+            书签拼图
           </TabsTrigger>
-          <TabsTrigger value="zones" aria-label="分区视图">
-            <Grid2X2 data-icon="inline-start" />
-            分区
+          <TabsTrigger value="zones" aria-label="文件夹视图">
+            <Folders data-icon="inline-start" />
+            文件夹
           </TabsTrigger>
         </TabsList>
       </nav>
-      <InputGroup className="search-field">
-        <InputGroupAddon>
-          <Search />
-        </InputGroupAddon>
-        <InputGroupInput
-          ref={inputRef}
-          value={query}
-          placeholder="搜索书签…"
-          aria-label="搜索书签"
-          onChange={(event) => change(event.target.value)}
-          onKeyDown={onKeyDown}
-        />
-        <InputGroupAddon align="inline-end">
-          {active ? (
-            <InputGroupButton
-              size="icon-xs"
-              aria-label="清空搜索"
-              onClick={() => {
-                clear()
-                inputRef.current?.focus()
-              }}
-            >
-              <X />
-            </InputGroupButton>
-          ) : (
-            <Kbd>
-              {/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ K" : "Ctrl K"}
-            </Kbd>
-          )}
-        </InputGroupAddon>
-      </InputGroup>
+      <Button
+        variant="outline"
+        className="search-field search-trigger"
+        aria-label="打开搜索"
+        onClick={search.openPalette}
+      >
+        <Search data-icon="inline-start" />
+        <span className="flex-1 truncate text-left">
+          {search.pageQuery || "搜索书签…"}
+        </span>
+        <Kbd>
+          {/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ K" : "Ctrl K"}
+        </Kbd>
+      </Button>
       <div className="header-tools">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

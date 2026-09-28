@@ -16,6 +16,7 @@ import { STORAGE_KEYS, subscribeStorage } from "@/lib/storage"
 export function useBookmarks() {
   const [data, setData] = useState<BookmarkData>({ groups: [], folders: [] })
   const [settings, setSettings] = useState(DEFAULT_SETTINGS)
+  const [settingsReady, setSettingsReady] = useState(false)
   const [clicks, setClicks] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -40,16 +41,25 @@ export function useBookmarks() {
   }, [])
   const refreshSettings = useCallback(async () => {
     const request = ++state.current.preferencesRequest
-    const next = await loadSettings()
-    if (
-      !state.current.alive ||
-      request !== state.current.preferencesRequest ||
-      state.current.pending
-    )
-      return
-    state.current.confirmed = next
-    state.current.settings = next
-    setSettings(next)
+    try {
+      const next = await loadSettings()
+      if (
+        !state.current.alive ||
+        request !== state.current.preferencesRequest ||
+        state.current.pending
+      )
+        return
+      state.current.confirmed = next
+      state.current.settings = next
+      setSettings(next)
+    } finally {
+      if (
+        state.current.alive &&
+        request === state.current.preferencesRequest &&
+        !state.current.pending
+      )
+        setSettingsReady(true)
+    }
   }, [])
   const refreshClicks = useCallback(async () => {
     const request = ++state.current.clickRequest
@@ -132,6 +142,7 @@ export function useBookmarks() {
   return {
     ...data,
     settings,
+    settingsReady,
     patchSettings,
     clicks,
     recordClick,

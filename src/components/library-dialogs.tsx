@@ -52,7 +52,13 @@ export function LibraryDialogs({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {overlay.type === "delete-folder" ? "删除文件夹？" : "删除书签？"}
+              {library.permanentConfirm
+                ? "永久删除？此操作无法撤销"
+                : library.capacityExceeded
+                  ? "所选内容超过恢复容量"
+                  : overlay.type === "delete-folder"
+                    ? "删除文件夹？"
+                    : "删除书签？"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {overlay.type === "delete-folder"
@@ -64,10 +70,23 @@ export function LibraryDialogs({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>取消</AlertDialogCancel>
+            {library.capacityExceeded && (
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={library.exportSelection}
+              >
+                导出所选
+              </Button>
+            )}
             <Button
               variant="destructive"
               disabled={busy}
-              onClick={() => void library.confirmDelete()}
+              onClick={() => {
+                if (library.capacityExceeded && !library.permanentConfirm)
+                  library.setPermanentConfirm(true)
+                else void library.confirmDelete(library.permanentConfirm)
+              }}
             >
               {busy && (
                 <LoaderCircle
@@ -75,7 +94,7 @@ export function LibraryDialogs({
                   className="animate-spin"
                 />
               )}
-              删除
+              {library.capacityExceeded ? "永久删除" : "删除"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

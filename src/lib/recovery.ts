@@ -10,8 +10,26 @@ import { descendants, folderSnapshot } from "./folders"
 import { readDocument, updateDocument } from "./storage"
 import { withLock } from "./platform"
 import { AppError } from "./errors"
+import {
+  beginOperation,
+  checkpoint,
+  finishOperation,
+  loadOperations,
+} from "./operations"
 
 const KEY = "tabnest:deleted:v1"
+export const RECOVERY_LIMIT = 4 * 1024 * 1024
+export const recoveryBytes = (entries: RecoveryEntry[]) =>
+  new TextEncoder().encode(JSON.stringify(entries)).length
+export function trimRecovery(entries: RecoveryEntry[]) {
+  const next = [...entries]
+    .sort((a, b) => Date.parse(b.deletedAt) - Date.parse(a.deletedAt))
+    .slice(0, 20)
+  while (next.length > 1 && recoveryBytes(next) > RECOVERY_LIMIT) next.pop()
+  if (recoveryBytes(next) > RECOVERY_LIMIT)
+    throw new AppError("recovery-capacity", "所选内容超过恢复容量")
+  return next
+}
 export type DeletedNode = {
   id: string
   title: string
@@ -45,6 +63,7 @@ function validate(raw: unknown): RecoveryEntry[] {
     }
   }
   for (const entry of raw) {
+    count = 0
     if (
       !entry ||
       typeof entry.id !== "string" ||
@@ -55,13 +74,27 @@ function validate(raw: unknown): RecoveryEntry[] {
       throw new Error("恢复记录无效")
     entry.nodes.forEach((value: DeletedNode) => node(value))
   }
-  if (new TextEncoder().encode(JSON.stringify(raw)).length > 4 * 1024 * 1024)
-    throw new AppError("storage", "恢复记录空间不足，请先导出备份")
+  if (recoveryBytes(raw) > RECOVERY_LIMIT)
+    throw new AppError("storage", "恢复记录超过容量")
   return raw
 }
 const read = () => readDocument(KEY, () => [], validate, false)
 const change = (update: (entries: RecoveryEntry[]) => RecoveryEntry[]) =>
   updateDocument(KEY, () => [], validate, update, false)
+export function clearRecovery(id?: string) {
+  return withLock("bookmarks", async () => {
+    const pending = await loadOperations()
+    if (
+      pending.some(
+        (entry) => entry.kind === "restore" && (!id || entry.sourceId === id)
+      )
+    )
+      throw new AppError("conflict", "请先检查待处理操作")
+    return change((entries) =>
+      id ? entries.filter((entry) => entry.id !== id) : []
+    )
+  })
+}
 const identities = (data: BookmarkData) =>
   new Set([
     ...data.folders.map((f) => f.id),
@@ -91,6 +124,7 @@ function demoNode(data: BookmarkData, id: string): DeletedNode {
     id,
     title: folder.title,
     parentId: folder.parentId,
+    index: folder.index,
     children: [
       ...data.folders
         .filter((child) => child.parentId === id)
@@ -98,7 +132,7 @@ function demoNode(data: BookmarkData, id: string): DeletedNode {
       ...(data.groups.find((group) => group.id === id)?.items || []).map(
         (item) => ({ ...item })
       ),
-    ],
+    ].sort((a, b) => (a.index ?? Infinity) - (b.index ?? Infinity)),
   }
 }
 function nativeNode(node: chrome.bookmarks.BookmarkTreeNode): DeletedNode {
@@ -113,7 +147,8 @@ function nativeNode(node: chrome.bookmarks.BookmarkTreeNode): DeletedNode {
 }
 
 export function deleteToRecovery(
-  request: { items: BookmarkItem[] } | { folderId: string; snapshot: string }
+  request: { items: BookmarkItem[] } | { folderId: string; snapshot: string },
+  permanent = false
 ) {
   return withLock("bookmarks", async () => {
     const data = await fetchBookmarkData()
@@ -170,17 +205,21 @@ export function deleteToRecovery(
       nodes,
     }
     const existing = identities(data)
-    await change((entries) =>
-      [
-        entry,
-        ...entries
-          .map((previous) => ({
-            ...previous,
-            nodes: previous.nodes.filter((node) => !existing.has(node.id)),
-          }))
-          .filter((previous) => previous.nodes.length),
-      ].slice(0, 20)
-    )
+    if (!permanent)
+      await change((entries) => {
+        const next = trimRecovery([
+          entry,
+          ...entries
+            .map((previous) => ({
+              ...previous,
+              nodes: previous.nodes.filter((node) => !existing.has(node.id)),
+            }))
+            .filter((previous) => previous.nodes.length),
+        ])
+        if (!next.some((record) => record.id === entry.id))
+          throw new AppError("storage", "无法保留本次恢复记录")
+        return next
+      })
     try {
       if (DEMO)
         await mutateDemo((current) => {
@@ -206,7 +245,9 @@ export function deleteToRecovery(
     } catch (cause) {
       throw new AppError(
         "partial-write",
-        "删除未全部完成，已删除内容可从最近删除中恢复",
+        permanent
+          ? "部分内容已永久删除，请检查书签"
+          : "删除未全部完成，已删除内容可从最近删除中恢复",
         { cause }
       )
     }
@@ -218,6 +259,8 @@ export function restoreDeleted(id: string) {
   return withLock("bookmarks", async () => {
     const entry = (await read()).find((entry) => entry.id === id)
     if (!entry) throw new AppError("conflict", "记录已恢复或已过期")
+    if ((await loadOperations()).some((operation) => operation.sourceId === id))
+      throw new AppError("conflict", "请先检查未完成的恢复")
     const ordered = [...entry.nodes].sort(
       (a, b) =>
         (a.parentId || "").localeCompare(b.parentId || "") ||
@@ -251,7 +294,13 @@ export function restoreDeleted(id: string) {
               )
             } else {
               const path = `${current.folders.find((f) => f.id === parentId)!.path} / ${node.title}`
-              current.folders.push({ id, title: node.title, path, parentId })
+              current.folders.push({
+                id,
+                title: node.title,
+                path,
+                parentId,
+                index: node.index,
+              })
               current.groups.push({ id, name: path, items: [] })
               node.children?.forEach((child) => create(child, id))
             }
@@ -281,6 +330,7 @@ export function restoreDeleted(id: string) {
           throw cause
         }
       } else {
+        const operation = await beginOperation("restore", node.title, id)
         const created = new Set<string>()
         let rootId = ""
         try {
@@ -301,7 +351,13 @@ export function restoreDeleted(id: string) {
                 : {}),
             })
             created.add(result.id)
-            if (root) rootId = result.id
+            if (root) {
+              rootId = result.id
+              operation.rootIds.push(rootId)
+              await checkpoint(operation)
+            }
+            operation.completed++
+            if (operation.completed % 32 === 0) await checkpoint(operation)
             for (const child of node.children || [])
               await create(child, result.id)
           }
@@ -315,6 +371,7 @@ export function restoreDeleted(id: string) {
               )
               .filter((e) => e.nodes.length)
           )
+          await finishOperation(operation.id).catch(() => {})
         } catch (cause) {
           if (rootId) {
             try {
@@ -333,6 +390,7 @@ export function restoreDeleted(id: string) {
               )
             }
           }
+          await finishOperation(operation.id)
           throw new AppError("operation", "恢复失败，删除记录已保留", { cause })
         }
       }

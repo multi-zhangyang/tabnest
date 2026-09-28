@@ -107,7 +107,7 @@ try {
       ) === 2
   )
   checks.push("actual-clicks-and-cross-tab-heat")
-  await page.click('[aria-label="分区视图"]')
+  await page.click('[aria-label="文件夹视图"]')
   await page.waitForSelector(".section-board")
   assert.equal(
     await page.$$eval(".section-bookmarks .bookmark-card", (els) => els.length),
@@ -137,7 +137,7 @@ try {
     `${fixture.barTitle} / 层级验收`
   )
   assert.equal(
-    await page.evaluate(() => document.body.textContent.includes("所有分区")),
+    await page.evaluate(() => document.body.textContent.includes("所有文件夹")),
     false
   )
   await page.click(`[aria-label="${fixture.barTitle}根目录操作"]`)
@@ -145,27 +145,27 @@ try {
     assert.equal(
       await page.evaluate(
         (action) =>
-          [...document.querySelectorAll('[role="menuitem"]')]
-            .find((el) => el.textContent === action)
-            .getAttribute("aria-disabled"),
+          [...document.querySelectorAll('[role="menuitem"]')].some(
+            (el) => el.textContent === action
+          ),
         action
       ),
-      "true"
+      false
     )
   }
   await page.keyboard.press("Escape")
-  await page.click('[aria-label="分区列表"]')
+  await page.click('[aria-label="文件夹列表"]')
   await otherPage.bringToFront()
   await otherPage.waitForSelector('.section-board[data-layout="list"]')
-  await otherPage.click('[aria-label="收起分区 子文件夹"]')
+  await otherPage.click('[aria-label="收起文件夹 子文件夹"]')
   await page.bringToFront()
-  await page.waitForSelector('[aria-label="展开分区 子文件夹"]')
+  await page.waitForSelector('[aria-label="展开文件夹 子文件夹"]')
   await page.reload({ waitUntil: "networkidle0" })
   assert.equal(
     await page.$(`[data-bookmark-id="${fixture.childBookmark}"]`),
     null
   )
-  await page.click('[aria-label="展开分区 子文件夹"]')
+  await page.click('[aria-label="展开文件夹 子文件夹"]')
   await page.waitForSelector(`[data-bookmark-id="${fixture.childBookmark}"]`)
   checks.push(
     "native-folder-blocks-no-duplicates-root-protection-cross-tab-collapse-and-layout"
@@ -227,7 +227,7 @@ try {
     false
   )
   checks.push("native-folder-move-rename-recursive-delete")
-  await page.click('[aria-label="热度云图"]')
+  await page.click('[aria-label="书签拼图"]')
   await page.waitForSelector(".heat-card")
   await mkdir("artifacts", { recursive: true })
   await page.screenshot({ path: "artifacts/extension-loaded.png" })

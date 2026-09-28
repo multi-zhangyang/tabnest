@@ -1,301 +1,276 @@
 import assert from "node:assert/strict"
 import { writeFile, mkdir } from "node:fs/promises"
-import { launchBrowser, openPreview, servePreview } from "./runtime.mjs"
+import os from "node:os"
+import {
+  launchBrowser,
+  openPreview,
+  servePreview,
+  chromePath,
+} from "./runtime.mjs"
+import { showSearchResults, clearSearch } from "./search-helpers.mjs"
 
 const preview = await servePreview(),
   browser = await launchBrowser()
 const results = [],
-  errors = []
+  errors = [],
+  delay = (ms) => new Promise((r) => setTimeout(r, ms))
+const percentile = (values) =>
+  [...values].sort((a, b) => a - b)[Math.ceil(values.length * 0.95) - 1]
+const scenarios = [
+  { count: 500, folders: 50 },
+  { count: 5000, folders: 50 },
+  { count: 5000, folders: 1000 },
+  { count: 20000, folders: 1000 },
+  { count: 20000, folders: 2000 },
+]
 try {
-  for (const count of [500, 2000, 5000]) {
-    const page = await browser.newPage()
-    page.on("pageerror", (error) => errors.push(error.message))
-    await openPreview(page, preview.url)
-    await page.evaluate((count) => {
-      const folders = [
-        {
-          id: "root",
-          title: "书签栏",
-          path: "书签栏",
-          parentId: "0",
-          root: true,
-          folderType: "bookmarks-bar",
-        },
-      ]
-      const groups = [{ id: "root", name: "书签栏", items: [] }]
-      for (let start = 0; start < count; start += 100) {
-        const id = `folder-${start}`
-        folders.push({
-          id,
-          title: `分区 ${start}`,
-          path: `书签栏 / 分区 ${start}`,
-          parentId: "root",
-        })
-        groups.push({
-          id,
-          name: `分区 ${start}`,
-          items: Array.from(
-            { length: Math.min(100, count - start) },
-            (_, offset) => ({
-              id: `b${start + offset}`,
-              title: `站点 ${start + offset}`,
-              url: `https://site${start + offset}.test/`,
-              parentId: id,
-              index: offset,
+  for (const scenario of scenarios) {
+    const samples = []
+    for (let run = 0; run < 5; run++) {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(15000)
+      page.on("pageerror", (e) => errors.push(e.message))
+      await openPreview(page, preview.url)
+      await page.evaluate(({ count, folders: folderCount }) => {
+        localStorage.clear()
+        const folders = [
+          {
+            id: "root",
+            title: "书签栏",
+            path: "书签栏",
+            parentId: "0",
+            root: true,
+            folderType: "bookmarks-bar",
+          },
+        ]
+        const groups = [{ id: "root", name: "书签栏", items: [] }]
+        for (let i = 0; i < folderCount; i++) {
+          const id = `f${i}`
+          folders.push({
+            id,
+            title: `文件夹 ${i}`,
+            path: `书签栏 / 文件夹 ${i}`,
+            parentId: "root",
+            index: i,
+          })
+          groups.push({ id, name: `文件夹 ${i}`, items: [] })
+        }
+        for (let i = 0; i < count; i++) {
+          const group = groups[1 + Math.floor((i * folderCount) / count)]
+          group.items.push({
+            id: `b${i}`,
+            title: `站点 ${i}`,
+            url: `https://site${i}.test/`,
+            parentId: group.id,
+            index: group.items.length,
+          })
+        }
+        const save = (key, data) =>
+          localStorage.setItem(
+            key,
+            JSON.stringify({
+              schemaVersion: 1,
+              revision: 1,
+              updatedAt: new Date().toISOString(),
+              data,
             })
-          ),
-        })
-      }
-      localStorage.clear()
-      const save = (key, data) =>
-        localStorage.setItem(
-          key,
-          JSON.stringify({
-            schemaVersion: 1,
-            revision: 1,
-            updatedAt: new Date().toISOString(),
-            data,
+          )
+        save("tabnest:demo-bookmarks:v2", { folders, groups })
+        save("tabnest:settings", { layout: "heat", iconMode: "favicon" })
+        save("tabnest:clicks", {})
+        localStorage.setItem("theme", "light")
+      }, scenario)
+      const start = performance.now()
+      await page.reload({ waitUntil: "domcontentloaded" })
+      await page.waitForSelector(".heat-card")
+      await page.evaluate(
+        () =>
+          new Promise((r) =>
+            requestAnimationFrame(() => requestAnimationFrame(r))
+          )
+      )
+      const firstCanvasMs = Math.round(performance.now() - start)
+      const heatDOM = await page.$$eval(".heat-card", (els) => els.length)
+      const heatUpdateMs = await page.evaluate(async () => {
+        window.open = () => null
+        const card = document.querySelector(".heat-card"),
+          id = card.dataset.bookmarkId,
+          count = Number(card.dataset.clicks),
+          start = performance.now()
+        card.dispatchEvent(
+          new MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+            ctrlKey: true,
           })
         )
-      save("tabnest:demo-bookmarks:v2", { folders, groups })
-      save("tabnest:settings", { layout: "heat", iconMode: "favicon" })
-      save("tabnest:clicks", {})
-      localStorage.setItem("theme", "light")
-    }, count)
-    console.log(JSON.stringify({ bookmarks: count, stage: "heat" }))
-    const start = performance.now()
-    await page.reload({ waitUntil: "domcontentloaded" })
-    await page.waitForSelector(".heat-card")
-    await page.evaluate(
-      () =>
-        new Promise((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(resolve))
-        )
-    )
-    const readyMs = Math.round(performance.now() - start)
-    const heatDOM = await page.$$eval(".heat-card", (nodes) => nodes.length)
-    assert.ok(heatDOM < 250, `heat DOM grew to ${heatDOM}`)
-    const heatUpdateMs = await page.evaluate(async () => {
-      window.open = () => null
-      const card = document.querySelector(".heat-card"),
-        id = card.dataset.bookmarkId
-      const count = Number(card.dataset.clicks),
-        start = performance.now()
-      card.dispatchEvent(
-        new MouseEvent("click", {
-          bubbles: true,
-          cancelable: true,
-          ctrlKey: true,
+        while (
+          Number(
+            document.querySelector(`[data-bookmark-id="${id}"]`)?.dataset.clicks
+          ) !==
+          count + 1
+        ) {
+          if (performance.now() - start > 5000) throw Error("heat timeout")
+          await new Promise((r) => requestAnimationFrame(r))
+        }
+        return Math.round(performance.now() - start)
+      })
+      await page.locator('[aria-label="打开搜索"]').click()
+      await page.waitForSelector('[aria-label="搜索书签"]')
+      const searchMs = await page.evaluate(async (count) => {
+        const input = document.querySelector('[aria-label="搜索书签"]'),
+          start = performance.now()
+        Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value"
+        ).set.call(input, `site${count - 1}.test`)
+        input.dispatchEvent(new Event("input", { bubbles: true }))
+        while (
+          !document.querySelector(`[data-value="bookmark:b${count - 1}"]`) ||
+          document
+            .querySelector(".search-command-list")
+            .getAttribute("aria-busy") === "true"
+        ) {
+          if (performance.now() - start > 10000) throw Error("search timeout")
+          await new Promise((r) => requestAnimationFrame(r))
+        }
+        return Math.round(performance.now() - start)
+      }, scenario.count)
+      await page.keyboard.press("Escape")
+      await showSearchResults(page, "站点")
+      await delay(120)
+      const searchDOM = await page.$$eval(
+        ".search-results .bookmark-card",
+        (els) => els.length
+      )
+      const target = await page.evaluate(() => {
+        const last = [
+          ...document.querySelectorAll(".search-results .bookmark-card"),
+        ].at(-1)
+        last.focus({ preventScroll: true })
+        return `b${Number(last.dataset.bookmarkId.slice(1)) + 1}`
+      })
+      await page.keyboard.press("Tab")
+      await page.waitForFunction(
+        (id) => document.activeElement?.dataset.bookmarkId === id,
+        {},
+        target
+      )
+      await page.keyboard.press("End")
+      await page.waitForFunction(
+        (count) => {
+          const el = document.activeElement,
+            b = el?.getBoundingClientRect()
+          return (
+            el?.dataset.bookmarkId === `b${count - 1}` &&
+            b.top >= 75 &&
+            b.bottom <= innerHeight + 1
+          )
+        },
+        {},
+        scenario.count
+      )
+      await clearSearch(page)
+      const zoneStart = performance.now()
+      await page.locator('[aria-label="文件夹视图"]').click()
+      await page.waitForSelector(".section-bookmarks .bookmark-card")
+      await delay(120)
+      const zonesMs = Math.round(performance.now() - zoneStart)
+      const sectionDOM = await page.$$eval(
+        ".section-bookmarks .bookmark-card",
+        (els) => els.length
+      )
+      await page.evaluate(() =>
+        scrollTo(0, document.documentElement.scrollHeight)
+      )
+      await delay(200)
+      // Estimated folder heights converge as the final sections are measured.
+      await page.evaluate(() =>
+        scrollTo(0, document.documentElement.scrollHeight)
+      )
+      await page.waitForFunction(() =>
+        [
+          ...document.querySelectorAll(".section-bookmarks .bookmark-card"),
+        ].some((el) => {
+          const b = el.getBoundingClientRect()
+          return b.top >= 75 && b.bottom <= innerHeight + 1
         })
       )
-      while (
-        Number(
-          document.querySelector(`[data-bookmark-id="${id}"]`)?.dataset.clicks
-        ) !==
-        count + 1
-      ) {
-        if (performance.now() - start > 5000)
-          throw new Error("Heat update timeout")
-        await new Promise((resolve) => requestAnimationFrame(resolve))
-      }
-      return Math.round(performance.now() - start)
-    })
-    assert.ok(heatUpdateMs < 500, `heat response ${heatUpdateMs}`)
-    const heatTabTarget = await page.evaluate((count) => {
-      const cards = [...document.querySelectorAll(".heat-card")]
-      const ids = new Set(cards.map((card) => card.dataset.bookmarkId))
-      const card =
-        cards.find((card) => {
-          const next = Number(card.dataset.bookmarkId.slice(1)) + 1
-          return next < count && !ids.has(`b${next}`)
-        }) || cards[0]
-      card.focus({ preventScroll: true })
-      return `b${Number(card.dataset.bookmarkId.slice(1)) + 1}`
-    }, count)
-    await page.keyboard.press("Tab")
-    await new Promise((resolve) => setTimeout(resolve, 220))
-    assert.equal(
-      await page.evaluate(() => document.activeElement?.dataset.bookmarkId),
-      heatTabTarget,
-      "heat keyboard focus was lost"
-    )
-
-    await page.evaluate(() =>
-      scrollTo(0, document.documentElement.scrollHeight)
-    )
-    await page.waitForFunction(() =>
-      [...document.querySelectorAll(".heat-card")].some(
-        (node) =>
-          node.getBoundingClientRect().top >= 0 &&
-          node.getBoundingClientRect().bottom <= innerHeight
+      const bottomDOM = await page.$$eval(
+        ".section-bookmarks .bookmark-card",
+        (els) => els.length
       )
-    )
-    console.log(JSON.stringify({ bookmarks: count, stage: "search" }))
-    const searchMs = await page.evaluate(async (count) => {
-      const input = document.querySelector('[aria-label="搜索书签"]')
-      const start = performance.now()
-      Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,
-        "value"
-      ).set.call(input, `site${count - 1}.test`)
-      input.dispatchEvent(new Event("input", { bubbles: true }))
-      while (
-        !document.querySelector(
-          `.search-results [data-bookmark-id="b${count - 1}"]`
-        )
+      assert.ok(
+        Math.max(heatDOM, searchDOM, sectionDOM, bottomDOM) <= 250,
+        `mounted bookmark budget: ${[heatDOM, searchDOM, sectionDOM, bottomDOM]}`
       )
-        await new Promise((resolve) => requestAnimationFrame(resolve))
-      return Math.round(performance.now() - start)
-    }, count)
-    await page.locator('[aria-label="搜索书签"]').fill("站点")
-    await page.waitForSelector(".search-results")
-    await page.evaluate(() => scrollTo(0, 0))
-    await new Promise((resolve) => setTimeout(resolve, 150))
-    const searchDOM = await page.$$eval(
-      ".search-results .bookmark-card",
-      (nodes) => nodes.length
-    )
-    assert.ok(searchDOM < 250)
-    console.log(JSON.stringify({ bookmarks: count, stage: "keyboard" }))
-    const tabTarget = await page.evaluate(() => {
-      const cards = [
-        ...document.querySelectorAll(".search-results .bookmark-card"),
-      ]
-      const last = cards.at(-1)
-      last.focus({ preventScroll: true })
-      return `b${Number(last.dataset.bookmarkId.slice(1)) + 1}`
-    })
-    await page.keyboard.press("Tab")
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    assert.equal(
-      await page.evaluate(() => document.activeElement?.dataset.bookmarkId),
-      tabTarget,
-      "virtualized keyboard focus was lost"
-    )
-
-    await page.locator('[aria-label="选择书签"]').click()
-    const selectionTarget = await page.evaluate(() => {
-      const checkbox = [
-        ...document.querySelectorAll(".search-results .bookmark-checkbox"),
-      ].at(-1)
-      checkbox.focus({ preventScroll: true })
-      return `b${Number(checkbox.closest("[data-item-id]").dataset.itemId.slice(1)) + 1}`
-    })
-    await page.keyboard.press("Tab")
-    await new Promise((resolve) => setTimeout(resolve, 220))
-    assert.equal(
-      await page.evaluate(
-        () => document.activeElement?.closest("[data-item-id]")?.dataset.itemId
-      ),
-      selectionTarget,
-      "selection focus was lost"
-    )
-    assert.equal(
-      await page.evaluate(() => document.activeElement?.getAttribute("role")),
-      "checkbox"
-    )
-    await page.keyboard.press("Space")
-    assert.equal(
-      await page.evaluate(() =>
-        document.activeElement?.getAttribute("aria-checked")
-      ),
-      "true"
-    )
-    await page.locator('[aria-label="退出多选"]').click()
-    await page.focus('[aria-label="搜索书签"]')
-    await page.keyboard.press("End")
-    const reachable = await page
-      .waitForFunction(
-        (count) => {
-          const last = document.querySelector(
-            `.search-results [data-bookmark-id="b${count - 1}"]`
-          )
-          if (!last || last.dataset.selected !== "true") return false
-          const bounds = last.getBoundingClientRect()
-          const headerBottom =
-            document.querySelector(".app-header")?.getBoundingClientRect()
-              .bottom || 0
-          return bounds.top >= headerBottom && bounds.bottom <= innerHeight + 1
-        },
-        { timeout: 3000, polling: "raf" },
-        count
-      )
-      .catch(async (error) => {
-        const diagnostic = await page.evaluate((count) => {
-          const grid = document.querySelector(".search-results")
-          const card = document.querySelector(
-            `[data-bookmark-id="b${count - 1}"]`
-          )
-          const bounds = (element) => element?.getBoundingClientRect().toJSON()
-          return {
-            count,
-            userAgent: navigator.userAgent,
-            scrollY,
-            viewport: { width: innerWidth, height: innerHeight },
-            documentHeight: document.documentElement.scrollHeight,
-            header: bounds(document.querySelector(".app-header")),
-            grid: bounds(grid),
-            paddingTop: grid && getComputedStyle(grid).paddingTop,
-            paddingBottom: grid && getComputedStyle(grid).paddingBottom,
-            columns: grid && getComputedStyle(grid).gridTemplateColumns,
-            target: bounds(card),
-            selected: card?.dataset.selected,
-            items: [...(grid?.children || [])].map((element) => ({
-              index: element.dataset.gridIndex,
-              bounds: bounds(element),
-            })),
-          }
-        }, count)
-        await mkdir("artifacts", { recursive: true })
-        await writeFile(
-          "artifacts/performance-failure.json",
-          JSON.stringify(diagnostic, null, 2)
-        )
-        await page.screenshot({ path: "artifacts/performance-failure.png" })
-        console.error(JSON.stringify(diagnostic))
-        throw error
+      samples.push({
+        run: run + 1,
+        firstCanvasMs,
+        searchMs,
+        heatUpdateMs,
+        zonesMs,
+        heatDOM,
+        searchDOM,
+        sectionDOM,
+        bottomDOM,
+        lastReachable: true,
       })
-    const lastReachable = await reachable.jsonValue()
-    await reachable.dispose()
-    assert.ok(lastReachable, "keyboard search cannot reach final result")
-    await page.keyboard.press("Escape")
-    console.log(JSON.stringify({ bookmarks: count, stage: "sections" }))
-    await page.locator('[aria-label="分区视图"]').click()
-    await page.waitForSelector(".section-bookmarks .bookmark-card")
-    await page.evaluate(() => scrollTo(0, 0))
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    const sectionDOM = await page.$$eval(
-      ".section-bookmarks .bookmark-card",
-      (nodes) => nodes.length
+      console.log(JSON.stringify({ ...scenario, ...samples.at(-1) }))
+      await page.close()
+    }
+    const p95 = Object.fromEntries(
+      ["firstCanvasMs", "searchMs", "heatUpdateMs", "zonesMs"].map((key) => [
+        key,
+        percentile(samples.map((s) => s[key])),
+      ])
     )
-    assert.ok(
-      sectionDOM < Math.max(350, count / 3),
-      `section DOM grew to ${sectionDOM}`
-    )
-    assert.ok(
-      readyMs < 5000 && searchMs < 500,
-      `performance regression ${readyMs}/${searchMs}`
-    )
-    results.push({
-      bookmarks: count,
-      firstCanvasMs: readyMs,
-      searchMs,
-      heatUpdateMs,
-      heatDOM,
-      searchDOM,
-      sectionDOM,
-      lastReachable,
-    })
-    console.log(JSON.stringify(results.at(-1)))
-    await page.close()
+    results.push({ ...scenario, samples, p95 })
   }
-  assert.deepEqual(errors, [])
+  const report = {
+    recordedAt: new Date().toISOString(),
+    device: {
+      os: `${os.platform()} ${os.release()}`,
+      cpu: os.cpus()[0]?.model,
+      cores: os.cpus().length,
+      memoryGB: Math.round(os.totalmem() / 1024 ** 3),
+      browser: await browser.version(),
+      executable: chromePath(),
+      viewport: "1440×900",
+      gpu: "disabled by test harness",
+    },
+    method:
+      "Five fresh pages per scenario; uncached layout; startup until two rendered frames; first query after search opens; actual storage-backed click update; no CPU/network throttling.",
+    targets: {
+      firstCanvasMs: 1500,
+      searchMs: 100,
+      heatUpdateMs: 100,
+      mountedBookmarks: 250,
+    },
+    results,
+    errors,
+  }
   await mkdir("artifacts", { recursive: true })
   await writeFile(
     "artifacts/performance-check.json",
-    JSON.stringify({ results, errors }, null, 2)
+    JSON.stringify(report, null, 2)
   )
-  console.log(JSON.stringify({ results, errors }, null, 2))
+  await writeFile(
+    "artifacts/performance-report.md",
+    `# TabNest performance\n\n${report.device.os} · ${report.device.cpu} · ${report.device.browser}\n\n${report.method}\n\n| Bookmarks | Folders | Canvas P95 | Search P95 | Click P95 |\n|---|---|---|---|---|\n${results.map((r) => `| ${r.count} | ${r.folders} | ${r.p95.firstCanvasMs} ms | ${r.p95.searchMs} ms | ${r.p95.heatUpdateMs} ms |`).join("\n")}\n`
+  )
+  assert.deepEqual(errors, [])
+  for (const result of results.filter((r) => r.count === 5000)) {
+    assert.ok(
+      result.p95.firstCanvasMs <= 1500,
+      `startup P95 ${result.p95.firstCanvasMs}`
+    )
+    assert.ok(result.p95.searchMs <= 100, `search P95 ${result.p95.searchMs}`)
+    assert.ok(
+      result.p95.heatUpdateMs <= 100,
+      `click P95 ${result.p95.heatUpdateMs}`
+    )
+  }
 } finally {
   await browser.close()
   await preview.close()

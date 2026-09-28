@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { toast } from "sonner"
 import type { BookmarkActions } from "@/components/bookmark-card"
 import type { FolderEditorState } from "@/components/folder-editor"
@@ -40,73 +40,102 @@ export function useLibraryActions({
 }) {
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [busy, setBusy] = useState(false)
-  function open(
-    item: BookmarkItem,
-    target: OpenTarget = settings.newTab ? "foreground" : "current"
-  ) {
-    const url = safeUrl(item.url)
-    if (!url) {
-      toast.error("无法打开此网址")
-      return
-    }
-    if (target !== "current") {
-      const record = () =>
-        recordClick(item.url).catch(() => toast.error("热度保存失败"))
-      if (!DEMO) {
-        const opening =
-          target === "window"
-            ? chrome.windows.create({ url, focused: true })
-            : chrome.tabs.create({ url, active: target === "foreground" })
-        void opening.then(record, () => toast.error("无法打开此网址"))
-      } else {
-        window.open(
-          url,
-          "_blank",
-          target === "window"
-            ? "noopener,noreferrer,popup"
-            : "noopener,noreferrer"
-        )
-        void record()
+  const [capacityExceeded, setCapacityExceeded] = useState(false)
+  const [permanentConfirm, setPermanentConfirm] = useState(false)
+  const open = useCallback(
+    function open(
+      item: BookmarkItem,
+      target: OpenTarget = settings.newTab ? "foreground" : "current"
+    ) {
+      const url = safeUrl(item.url)
+      if (!url) {
+        toast.error("无法打开此网址")
+        return
       }
-    } else {
-      void recordClick(item.url)
-        .catch(() => {})
-        .finally(() => window.location.assign(url))
-    }
-  }
-  const actions: BookmarkActions = {
-    open,
-    edit: (item) => setOverlay({ type: "bookmark", item }),
-    remove: (item) => setOverlay({ type: "delete-bookmark", item }),
-    copy: (url) => {
-      void navigator.clipboard.writeText(url).then(
-        () => toast.success("网址已复制"),
-        () => toast.error("复制失败")
-      )
+      if (target !== "current") {
+        const record = () =>
+          recordClick(item.url).catch(() => toast.error("热度保存失败"))
+        if (!DEMO) {
+          const opening =
+            target === "window"
+              ? chrome.windows.create({ url, focused: true })
+              : chrome.tabs.create({ url, active: target === "foreground" })
+          void opening.then(record, () => toast.error("无法打开此网址"))
+        } else {
+          window.open(
+            url,
+            "_blank",
+            target === "window"
+              ? "noopener,noreferrer,popup"
+              : "noopener,noreferrer"
+          )
+          void record()
+        }
+      } else {
+        void recordClick(item.url)
+          .catch(() => {})
+          .finally(() => window.location.assign(url))
+      }
     },
-    move: (item, direction) => {
-      void moveBookmark(item, direction)
-        .then(async () => {
-          patchSettings({ sort: "default" })
-          await reload()
-        })
-        .catch((cause) =>
-          toast.error(cause instanceof Error ? cause.message : "操作失败")
+    [settings.newTab, recordClick]
+  )
+  const actions = useMemo<BookmarkActions>(
+    () => ({
+      open,
+      edit: (item) => setOverlay({ type: "bookmark", item }),
+      remove: (item) => setOverlay({ type: "delete-bookmark", item }),
+      copy: (url) => {
+        void navigator.clipboard.writeText(url).then(
+          () => toast.success("网址已复制"),
+          () => toast.error("复制失败")
         )
+      },
+      move: (item, direction) => {
+        void moveBookmark(item, direction)
+          .then(async () => {
+            patchSettings({ sort: "default" })
+            await reload()
+          })
+          .catch((cause) =>
+            toast.error(cause instanceof Error ? cause.message : "操作失败")
+          )
+      },
+    }),
+    [open, patchSettings, reload]
+  )
+  const deleteFolder = useCallback(
+    function deleteFolder(folder: BookmarkFolder) {
+      const ids = descendants(data.folders, folder.id)
+      setOverlay({
+        type: "delete-folder",
+        folder,
+        snapshot: folderSnapshot(
+          { folders: data.folders, groups: data.groups },
+          folder.id
+        ),
+        count: data.groups
+          .filter((group) => ids.has(group.id))
+          .reduce((sum, group) => sum + group.items.length, 0),
+      })
     },
-  }
-  function deleteFolder(folder: BookmarkFolder) {
-    const ids = descendants(data.folders, folder.id)
-    setOverlay({
-      type: "delete-folder",
-      folder,
-      snapshot: folderSnapshot(data, folder.id),
-      count: data.groups
-        .filter((group) => ids.has(group.id))
-        .reduce((sum, group) => sum + group.items.length, 0),
-    })
-  }
-  async function confirmDelete() {
+    [data.folders, data.groups]
+  )
+  const deleteMany = useCallback(
+    (items: BookmarkItem[]) => setOverlay({ type: "delete-many", items }),
+    []
+  )
+  const editFolder = useCallback(
+    (state: FolderEditorState) => setOverlay({ type: "folder", ...state }),
+    []
+  )
+  const openGroup = useCallback(
+    (items: BookmarkItem[]) => {
+      if (items.length > 8) setOverlay({ type: "open-group", items })
+      else items.forEach((item) => open(item, "background"))
+    },
+    [open]
+  )
+  async function confirmDelete(permanent = false) {
     if (
       busy ||
       (overlay?.type !== "delete-bookmark" &&
@@ -122,36 +151,129 @@ export function useLibraryActions({
           : {
               items:
                 overlay.type === "delete-many" ? overlay.items : [overlay.item],
-            }
+            },
+        permanent
       )
       await reload()
       toast.success(
         overlay.type === "delete-folder" ? "文件夹已删除" : "书签已删除",
-        {
-          duration: 8000,
-          action: {
-            label: "撤销",
-            onClick: () => {
-              void restoreDeleted(entry.id)
-                .then(reload)
-                .then(
-                  () => toast.success("已恢复"),
-                  (cause) =>
-                    toast.error(
-                      cause instanceof Error ? cause.message : "恢复失败"
+        permanent
+          ? undefined
+          : {
+              duration: 8000,
+              action: {
+                label: "撤销",
+                onClick: () => {
+                  void restoreDeleted(entry.id)
+                    .then(reload)
+                    .then(
+                      () => toast.success("已恢复"),
+                      (cause) =>
+                        toast.error(
+                          cause instanceof Error ? cause.message : "恢复失败"
+                        )
                     )
-                )
-            },
-          },
-        }
+                },
+              },
+            }
       )
       setOverlay(null)
+      setCapacityExceeded(false)
+      setPermanentConfirm(false)
     } catch (cause) {
+      if (
+        cause &&
+        typeof cause === "object" &&
+        "code" in cause &&
+        cause.code === "recovery-capacity"
+      ) {
+        setCapacityExceeded(true)
+        return
+      }
       toast.error(cause instanceof Error ? cause.message : "删除失败")
       if (overlay.type === "delete-folder") setOverlay(null)
     } finally {
       setBusy(false)
     }
+  }
+  async function exportHtml() {
+    try {
+      const { exportHtmlBookmarks } = await import("@/lib/html-bookmarks")
+      const url = URL.createObjectURL(
+        new Blob([exportHtmlBookmarks(data)], {
+          type: "text/html;charset=utf-8",
+        })
+      )
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `TabNest-${new Date().toLocaleDateString("sv-SE")}.html`
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      toast.success("书签已导出")
+    } catch {
+      toast.error("导出失败")
+    }
+  }
+  function exportSelection() {
+    if (
+      !overlay ||
+      !["delete-folder", "delete-bookmark", "delete-many"].includes(
+        overlay.type
+      )
+    )
+      return
+    const folderIds =
+      overlay.type === "delete-folder"
+        ? descendants(data.folders, overlay.folder.id)
+        : null
+    const itemIds = new Set(
+      overlay.type === "delete-bookmark"
+        ? [overlay.item.id]
+        : overlay.type === "delete-many"
+          ? overlay.items.map((item) => item.id)
+          : []
+    )
+    const selectedGroups = data.groups
+      .filter(
+        (group) =>
+          folderIds?.has(group.id) ||
+          group.items.some((item) => itemIds.has(item.id))
+      )
+      .map((group) => ({
+        ...group,
+        items: folderIds
+          ? group.items
+          : group.items.filter((item) => itemIds.has(item.id)),
+      }))
+    const included = new Set([
+      ...selectedGroups.map((group) => group.id),
+      ...(folderIds || []),
+    ])
+    const selectedFolders = data.folders
+      .filter((folder) => included.has(folder.id))
+      .map((folder) => ({
+        ...folder,
+        parentId: included.has(folder.parentId || "")
+          ? folder.parentId
+          : undefined,
+      }))
+    const url = URL.createObjectURL(
+      new Blob(
+        [
+          JSON.stringify(
+            createBackup({ folders: selectedFolders, groups: selectedGroups }),
+            null,
+            2
+          ),
+        ],
+        { type: "application/json" }
+      )
+    )
+    const link = document.createElement("a")
+    link.href = url
+    link.download = "TabNest-selected.json"
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
   async function exportBookmarks(full = false) {
     try {
@@ -176,9 +298,15 @@ export function useLibraryActions({
     overlay,
     busy,
     confirmDelete,
+    capacityExceeded,
+    permanentConfirm,
+    setPermanentConfirm,
+    exportSelection,
+    exportHtml: () => {
+      void exportHtml()
+    },
     deleteFolder,
-    deleteMany: (items: BookmarkItem[]) =>
-      setOverlay({ type: "delete-many", items }),
+    deleteMany,
     exportBookmarks: () => {
       void exportBookmarks()
     },
@@ -186,16 +314,16 @@ export function useLibraryActions({
       void exportBookmarks(true)
     },
     add: (parentId?: string) => setOverlay({ type: "bookmark", parentId }),
-    editFolder: (state: FolderEditorState) =>
-      setOverlay({ type: "folder", ...state }),
+    editFolder,
     importBookmarks: () => setOverlay({ type: "import" }),
     close: () => {
-      if (!busy) setOverlay(null)
+      if (!busy) {
+        setOverlay(null)
+        setCapacityExceeded(false)
+        setPermanentConfirm(false)
+      }
     },
-    openGroup: (items: BookmarkItem[]) => {
-      if (items.length > 8) setOverlay({ type: "open-group", items })
-      else items.forEach((item) => open(item, "background"))
-    },
+    openGroup,
     confirmOpen: () => {
       if (overlay?.type === "open-group") {
         overlay.items.forEach((item) => open(item, "background"))

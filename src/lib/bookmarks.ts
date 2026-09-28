@@ -44,7 +44,7 @@ export function parseBookmarkTree(
     inheritedReadOnly = false
   ) {
     if (node.url || !node.children) return
-    const title = node.title || (node.id === "1" ? "书签栏" : "未命名分区")
+    const title = node.title || (node.id === "1" ? "书签栏" : "未命名文件夹")
     const nextPath =
       node.id === "0" ? "" : [path, title].filter(Boolean).join(" / ")
     if (node.id !== "0") {
@@ -56,6 +56,7 @@ export function parseBookmarkTree(
         readOnly: inheritedReadOnly || node.unmodifiable === "managed",
         root: Boolean(node.folderType) || (node.parentId ?? parentId) === "0",
         folderType: node.folderType,
+        index: node.index,
       })
       groups.push({
         id: node.id,
@@ -150,7 +151,7 @@ export function validateBookmarkData(raw: unknown): BookmarkData {
       typeof folder.path !== "string" ||
       ids.has(folder.id)
     )
-      throw new AppError("invalid-data", "分区数据无效")
+      throw new AppError("invalid-data", "文件夹数据无效")
     if (folder.parentId !== undefined && typeof folder.parentId !== "string")
       throw new AppError("invalid-data", "文件夹层级无效")
     ids.add(folder.id)
@@ -177,7 +178,7 @@ export function validateBookmarkData(raw: unknown): BookmarkData {
       groups.has(group.id) ||
       !ids.has(group.id)
     )
-      throw new AppError("invalid-data", "分区数据无效")
+      throw new AppError("invalid-data", "文件夹数据无效")
     groups.add(group.id)
     for (const item of group.items) {
       if (
@@ -208,11 +209,27 @@ export async function mutateDemo(mutate: (data: BookmarkData) => void) {
     validateBookmarkData,
     (data) => {
       mutate(data)
-      for (const group of data.groups)
-        group.items.forEach((item, index) => {
+      for (const group of data.groups) {
+        const children = data.folders.filter(
+          (folder) => folder.parentId === group.id
+        )
+        let tail =
+          Math.max(
+            -1,
+            ...group.items.map((item) => item.index ?? -1),
+            ...children.map((folder) => folder.index ?? -1)
+          ) + 1
+        for (const folder of children)
+          if (folder.index === undefined) folder.index = tail++
+        const occupied = new Set(children.map((folder) => folder.index))
+        let index = 0
+        group.items.forEach((item) => {
+          while (occupied.has(index)) index++
           item.index = index
           item.parentId = group.id
+          index++
         })
+      }
       return data
     },
     false
@@ -247,13 +264,13 @@ function assertUnchanged(
 async function saveBookmarkUnlocked(input: BookmarkWrite) {
   const url = normalizeUrl(input.url)
   const title = input.title.trim() || domainOf(url)
-  if (!input.parentId) throw new AppError("invalid-data", "请选择分区")
+  if (!input.parentId) throw new AppError("invalid-data", "请选择文件夹")
   if (title.length > 1024)
     throw new AppError("invalid-data", "名称不能超过 1024 个字符")
   if (!DEMO) {
     const [destination] = await chrome.bookmarks.get(input.parentId)
     if (!destination || destination.url || destination.unmodifiable)
-      throw new AppError("operation", "此分区无法写入")
+      throw new AppError("operation", "此文件夹无法写入")
     if (input.id) {
       const [current] = await chrome.bookmarks.get(input.id)
       if (current.unmodifiable) throw new AppError("operation", "此书签为只读")
@@ -279,7 +296,7 @@ async function saveBookmarkUnlocked(input: BookmarkWrite) {
           } catch {
             throw new AppError(
               "partial-write",
-              "名称和网址未保存，书签位置已变化，请检查分区",
+              "名称和网址未保存，书签位置已变化，请检查文件夹",
               { cause }
             )
           }
@@ -292,7 +309,7 @@ async function saveBookmarkUnlocked(input: BookmarkWrite) {
   }
   await mutateDemo((data) => {
     const target = data.groups.find((g) => g.id === input.parentId)
-    if (!target) throw new AppError("conflict", "分区不存在")
+    if (!target) throw new AppError("conflict", "文件夹不存在")
     if (data.folders.find((folder) => folder.id === target.id)?.readOnly)
       throw new AppError("operation", "此文件夹不可写入")
     const previous = data.groups
@@ -369,8 +386,8 @@ export function createFolder(title: string, parentId?: string) {
 }
 
 async function createFolderUnlocked(title: string, parentId?: string) {
-  if (!title.trim()) throw new AppError("invalid-data", "请输入分区名称")
-  if (title.length > 1024) throw new AppError("invalid-data", "分区名称过长")
+  if (!title.trim()) throw new AppError("invalid-data", "请输入文件夹名称")
+  if (title.length > 1024) throw new AppError("invalid-data", "文件夹名称过长")
   const data = await fetchBookmarkData()
   parentId = parentId || defaultFolderId(data.folders)
   if (

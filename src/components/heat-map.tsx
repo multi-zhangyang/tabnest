@@ -1,18 +1,15 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { CSSProperties } from "react"
 import { BookmarkCard } from "./bookmark-card"
 import type { BookmarkActions } from "./bookmark-card"
 import type { AppSettings, BookmarkItem } from "@/lib/types"
-import {
-  heatLayout,
-  heatWeight,
-  hydrateHeatTopologies,
-  persistHeatTopologies,
-} from "@/lib/heat-layout"
+import { hydrateHeatTopologies } from "@/lib/heat-layout"
 import { useVisibleCanvas } from "@/hooks/use-visible-canvas"
+import { useHeatCanvas } from "@/hooks/use-heat-canvas"
+import { useBookmarkManagement } from "./bookmark-management"
 hydrateHeatTopologies()
 
-export function HeatMap({
+export const HeatMap = memo(function HeatMap({
   items,
   clicks,
   settings,
@@ -24,6 +21,44 @@ export function HeatMap({
   actions: BookmarkActions
 }) {
   const container = useRef<HTMLDivElement>(null)
+  const management = useBookmarkManagement()
+  const [overlayOpen, setOverlayOpen] = useState(false)
+  const frozen = overlayOpen || !!management?.active || !!management?.drop
+  const pausedGeometry = useRef<Animation[]>([])
+  useLayoutEffect(() => {
+    if (frozen) {
+      pausedGeometry.current = [
+        ...(container.current?.querySelectorAll<HTMLElement>(".heat-cell") ||
+          []),
+      ]
+        .flatMap((cell) => cell.getAnimations())
+        .filter((animation) => animation.playState === "running")
+      pausedGeometry.current.forEach((animation) => animation.pause())
+    } else {
+      pausedGeometry.current.forEach((animation) => animation.play())
+      pausedGeometry.current = []
+    }
+  }, [frozen])
+  useEffect(() => {
+    let frame = 0
+    const update = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() =>
+        setOverlayOpen(
+          !!document.querySelector(
+            '[role="dialog"], [role="alertdialog"], [role="menu"]'
+          )
+        )
+      )
+    }
+    const observer = new MutationObserver(update)
+    observer.observe(document.body, { childList: true, subtree: true })
+    update()
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+    }
+  }, [])
   const visible = useVisibleCanvas(container, items.length > 250)
   const [focusedId, setFocusedId] = useState("")
   const pendingFocus = useRef("")
@@ -68,27 +103,15 @@ export function HeatMap({
   }, [])
   const gap =
     settings.density === "compact" ? 5 : settings.density === "loose" ? 12 : 8
-  const height = useMemo(() => {
-    if (!size.width || !items.length) return size.available
-    const weights = items.map((item) => heatWeight(clicks[item.url] || 0))
-    const minimumArea =
-      Math.min(17500, size.width * 0.34 * 105) * settings.cardScale ** 2
-    return Math.max(
-      size.available,
-      Math.ceil(
-        ((weights.reduce((a, b) => a + b, 0) / Math.min(...weights)) *
-          minimumArea) /
-          size.width
-      )
-    )
-  }, [items, clicks, size, settings.cardScale])
-  const boxes = useMemo(
-    () => heatLayout(items, clicks, size.width, height, gap),
-    [items, size.width, height, clicks, gap]
+  const { height, boxes } = useHeatCanvas(
+    items,
+    clicks,
+    size.width,
+    size.available,
+    gap,
+    settings.cardScale,
+    frozen
   )
-  useEffect(() => {
-    persistHeatTopologies()
-  }, [boxes])
   return (
     <div className="heat-view">
       <div
@@ -193,6 +216,7 @@ export function HeatMap({
                 vertical={vertical}
                 compact={compact}
                 tiny={tiny}
+                heatSize={{ width: box.width, height: box.height }}
                 style={style}
                 count={clicks[box.item.url] || 0}
               />
@@ -201,4 +225,4 @@ export function HeatMap({
       </div>
     </div>
   )
-}
+})

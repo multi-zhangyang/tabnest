@@ -11,10 +11,12 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { FolderPicker } from "./folder-picker"
 import { defaultFolderId } from "@/lib/bookmarks"
-import type { BackupData } from "@/lib/backup"
+import type { ImportPlan } from "@/lib/backup"
 import { Switch } from "@/components/ui/switch"
 import type { BookmarkFolder } from "@/lib/types"
-import { importBackup, parseBackup } from "@/lib/backup"
+import { executeImportPlan, planJsonImport } from "@/lib/backup"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Progress } from "@/components/ui/progress"
 import { errorMessage } from "@/lib/errors"
 
 export function ImportDialog({
@@ -26,21 +28,33 @@ export function ImportDialog({
   onClose: () => void
   onSaved: () => Promise<void>
 }) {
-  const [data, setData] = useState<BackupData | null>(null)
+  const [plan, setPlan] = useState<ImportPlan | null>(null)
+  const data = plan?.data
+  const [skipped, setSkipped] = useState<string[]>([])
+  const [progress, setProgress] = useState(0)
   const [restore, setRestore] = useState(false)
   const [parentId, setParentId] = useState(defaultFolderId(folders))
   const [busy, setBusy] = useState(false)
   const [reading, setReading] = useState(false)
   const [error, setError] = useState("")
   async function load(file?: File) {
-    setData(null)
+    setPlan(null)
+    setSkipped([])
     setRestore(false)
     setError("")
     if (!file) return
     setReading(true)
     try {
       if (file.size > 10 * 1024 * 1024) throw new Error("文件不能超过 10 MB")
-      setData(parseBackup(await file.text()))
+      const source = await file.text()
+      const next =
+        /\.html?$/i.test(file.name) || /^\s*</.test(source)
+          ? (await import("@/lib/html-bookmarks")).planHtmlImport(source)
+          : planJsonImport(source)
+      setPlan(next)
+      setSkipped(
+        next.issues.filter((issue) => issue.blocking).map((issue) => issue.id)
+      )
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "文件读取失败")
     } finally {
@@ -48,11 +62,20 @@ export function ImportDialog({
     }
   }
   async function submit() {
-    if (!data || busy) return
+    if (!plan || busy) return
     setBusy(true)
     setError("")
     try {
-      await importBackup(data, parentId || undefined, restore)
+      await executeImportPlan(
+        plan,
+        parentId || undefined,
+        restore,
+        skipped,
+        (done, total) => {
+          if (done % 16 === 0 || done === total)
+            setProgress(total ? (done / total) * 100 : 100)
+        }
+      )
       await onSaved()
       toast.success("书签已导入")
       onClose()
@@ -83,11 +106,11 @@ export function ImportDialog({
     >
       <FieldGroup>
         <Field data-invalid={!!error || undefined}>
-          <FieldLabel htmlFor="backup-file">TabNest 备份</FieldLabel>
+          <FieldLabel htmlFor="backup-file">书签文件</FieldLabel>
           <Input
             id="backup-file"
             type="file"
-            accept=".json,application/json"
+            accept=".json,.html,.htm,application/json,text/html"
             onChange={(event) => void load(event.target.files?.[0])}
             disabled={busy || reading}
             aria-invalid={!!error}
@@ -102,6 +125,36 @@ export function ImportDialog({
             </Badge>
           </div>
         )}
+        {!!plan?.issues.length && (
+          <div className="import-issues">
+            {plan.issues.map((issue) => (
+              <label className="import-issue" key={issue.id}>
+                <Checkbox
+                  checked={skipped.includes(issue.id)}
+                  disabled={busy || issue.blocking}
+                  aria-label={`跳过 ${issue.title}`}
+                  onCheckedChange={(checked) =>
+                    setSkipped((current) =>
+                      checked
+                        ? [...current, issue.id]
+                        : current.filter((id) => id !== issue.id)
+                    )
+                  }
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{issue.title}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {issue.url}
+                  </span>
+                </span>
+                <Badge variant="secondary">
+                  {skipped.includes(issue.id) ? "跳过" : issue.reason}
+                </Badge>
+              </label>
+            ))}
+          </div>
+        )}
+        {busy && <Progress value={progress} aria-label="导入进度" />}
         <Field>
           <FieldLabel htmlFor="import-parent">导入位置</FieldLabel>
           <FolderPicker

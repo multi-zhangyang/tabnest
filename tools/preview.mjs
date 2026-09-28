@@ -9,7 +9,7 @@ try {
   await page.waitForSelector(".heat-card")
   await mkdir("artifacts", { recursive: true })
   await page.screenshot({ path: "artifacts/heat-dark.png" })
-  await page.click('[aria-label="分区视图"]')
+  await page.click('[aria-label="文件夹视图"]')
   await new Promise((resolve) => setTimeout(resolve, 500))
   await page.screenshot({ path: "artifacts/folders.png" })
   console.log(

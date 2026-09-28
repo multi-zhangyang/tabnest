@@ -19,5 +19,5 @@ export async function showSearchResults(page, query) {
 export async function clearSearch(page) {
   if (await page.$(".search-dialog")) await page.keyboard.press("Escape")
   const clear = await page.$('[aria-label="清空搜索"]')
-  if (clear) await clear.click()
+  if (clear) await clear.asLocator().click()
 }

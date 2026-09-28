@@ -109,13 +109,16 @@ test("Netscape HTML preserves escaped titles, nested folders, scripts as data an
   assert.ok(html.exportHtmlBookmarks(plan.data).includes("A &amp; B"))
 })
 test("recovery evicts oldest entries by bytes and refuses oversized individual deletion", () => {
-  const entry = (id, size) => ({
+  const entry = (id, size, deletedAt = "2026-09-28T00:00:00.000Z") => ({
     id,
     title: id,
-    deletedAt: new Date().toISOString(),
+    deletedAt,
     nodes: [{ id, title: "x".repeat(size) }],
   })
-  const entries = [entry("new", 2200000), entry("old", 2200000)]
+  const entries = [
+    entry("old", 2200000, "2026-09-27T00:00:00.000Z"),
+    entry("new", 2200000),
+  ]
   assert.deepEqual(
     recovery.trimRecovery(entries).map((e) => e.id),
     ["new"]

@@ -10,6 +10,8 @@ const checks = [],
 let page
 try {
   page = await browser.newPage()
+  if (process.env.TEST_CPU_RATE)
+    await page.emulateCPUThrottling(Number(process.env.TEST_CPU_RATE))
   page.on("pageerror", (e) => errors.push(e.message))
   await openPreview(page, preview.url)
   await page.evaluate(() => {
@@ -45,6 +47,18 @@ try {
   await page.reload()
   await page.waitForSelector(".heat-card")
   await showSearchResults(page, "站点")
+  await page.evaluate(() => {
+    window.__focusEvents = []
+    for (const type of ["keydown", "pointerdown", "wheel", "focusin", "focusout"])
+      window.addEventListener(type, (event) => {
+        window.__focusEvents.push({
+          type,
+          key: event.key,
+          target: event.target?.getAttribute?.("data-bookmark-id"),
+          related: event.relatedTarget?.getAttribute?.("data-bookmark-id"),
+        })
+      }, true)
+  })
   const reveal = async (id) =>
     page.waitForFunction(
       (id) => {
@@ -79,6 +93,14 @@ try {
   await new Promise((r) => setTimeout(r, 200))
   await reveal("b499")
   checks.push("end-focus-survives-late-row-measurement")
+  await page.evaluate(() => scrollTo({ top: 2000, behavior: "instant" }))
+  await new Promise((r) => setTimeout(r, 200))
+  assert.equal(
+    await page.evaluate(() => scrollY),
+    2000,
+    "Scrolling a control into view must not snap back to keyboard focus"
+  )
+  checks.push("programmatic-scroll-does-not-follow-focus")
   await page.keyboard.press("Home")
   await reveal("b0")
   checks.push("home-reveals-first-result")
@@ -109,6 +131,7 @@ try {
       height: innerHeight,
       scrollHeight: document.documentElement.scrollHeight,
       frames: window.__focusFrames,
+      events: window.__focusEvents,
     }))
     .catch(() => null)
   await writeFile(

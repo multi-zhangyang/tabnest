@@ -19,36 +19,17 @@ export function BookmarkGrid({
   const ref = useRef<HTMLDivElement>(null)
   const virtual = items.length > 250 || virtualize
   const range = useVisibleCanvas(ref, virtual)
-  const [metrics, setMetrics] = useState({ columns: 1, stride: 100, gap: 6 })
+  const [metrics, setMetrics] = useState({
+    columns: 1,
+    stride: 100,
+    gap: 6,
+    rowGap: 6,
+  })
   const [focus, setFocus] = useState(-1)
   const pending = useRef(-1)
   const keyboardFocus = useRef(false)
-  useLayoutEffect(() => {
-    if (!ref.current) return
-    const element = ref.current
-    const measure = () => {
-      const style = getComputedStyle(element)
-      const columns = style.gridTemplateColumns.split(" ").length
-      const first = element.querySelector<HTMLElement>(
-        ".bookmark-grid-item:not([data-pinned])"
-      )
-      const stride =
-        (first?.getBoundingClientRect().height || 82) +
-        (parseFloat(style.rowGap) || 0)
-      const gap = parseFloat(style.columnGap) || 0
-      setMetrics((previous) =>
-        previous.columns === columns &&
-        previous.gap === gap &&
-        Math.abs(previous.stride - stride) < 0.5
-          ? previous
-          : { columns, stride, gap }
-      )
-    }
-    const observer = new ResizeObserver(measure)
-    observer.observe(element)
-    measure()
-    return () => observer.disconnect()
-  }, [virtual, items.length])
+  // Visible and pinned cells share row coordinates; changing the mounted range
+  // must not move a focused cell between normal flow and absolute positioning.
   const rows = Math.ceil(items.length / metrics.columns)
   const first = Math.min(
     Math.max(0, rows - 1),
@@ -69,6 +50,33 @@ export function BookmarkGrid({
     (focus < start || focus >= end)
       ? focus
       : -1
+  useLayoutEffect(() => {
+    if (!ref.current) return
+    const element = ref.current
+    const first = element.querySelector<HTMLElement>(
+      ".bookmark-grid-item:not([data-pinned])"
+    )
+    const measure = () => {
+      const style = getComputedStyle(element)
+      const columns = style.gridTemplateColumns.split(" ").length
+      const rowGap = parseFloat(style.rowGap) || 0
+      const stride = (first?.getBoundingClientRect().height || 82) + rowGap
+      const gap = parseFloat(style.columnGap) || 0
+      setMetrics((previous) =>
+        previous.columns === columns &&
+        previous.gap === gap &&
+        previous.rowGap === rowGap &&
+        Math.abs(previous.stride - stride) < 0.5
+          ? previous
+          : { columns, stride, gap, rowGap }
+      )
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    if (first) observer.observe(first)
+    measure()
+    return () => observer.disconnect()
+  }, [virtual, items.length, start])
   useLayoutEffect(() => {
     if (!virtual || selected < 0 || !ref.current) return
     const top =
@@ -106,9 +114,7 @@ export function BookmarkGrid({
     }
   }, [focus])
   useLayoutEffect(() => {
-    if (!virtual) return
-    // Reconcile focus with each committed range, including delayed spacer updates.
-    // Wheel, touch and pointer input cancel this before changing the viewport.
+    if (!virtual || focus < 0 || !ref.current) return
     const frame = requestAnimationFrame(() => {
       const element = document.activeElement
       if (
@@ -121,12 +127,12 @@ export function BookmarkGrid({
       const margin = parseFloat(getComputedStyle(element).scrollMarginTop) || 88
       const delta =
         bounds.top < margin
-          ? bounds.top - margin
-          : Math.max(0, bounds.bottom - innerHeight)
+          ? Math.floor(bounds.top - margin)
+          : Math.max(0, Math.ceil(bounds.bottom - innerHeight))
       if (delta) window.scrollBy({ top: delta, behavior: "instant" })
     })
     return () => cancelAnimationFrame(frame)
-  }, [virtual, metrics, focus, start, end])
+  }, [virtual, metrics, focus])
   return (
     <div
       ref={ref}
@@ -136,8 +142,7 @@ export function BookmarkGrid({
           ? {
               position: "relative",
               overflowAnchor: "none",
-              paddingTop: first * metrics.stride,
-              paddingBottom: (rows - last) * metrics.stride,
+              height: Math.max(0, rows * metrics.stride - metrics.rowGap),
             }
           : undefined
       }
@@ -205,7 +210,7 @@ export function BookmarkGrid({
             data-pinned={index === pinned || undefined}
             key={items[index].id}
             style={
-              index === pinned
+              virtual
                 ? {
                     position: "absolute",
                     top: Math.floor(index / metrics.columns) * metrics.stride,

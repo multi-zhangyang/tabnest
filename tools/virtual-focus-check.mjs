@@ -63,6 +63,18 @@ try {
   await page.keyboard.press("End")
   await reveal("b499")
   // Simulate the row-height change caused by a late fallback font on CI.
+  await page.evaluate(() => {
+    window.__focusFrames = []
+    const sample = () => {
+      window.__focusFrames.push({
+        scrollY,
+        top: document.activeElement?.getBoundingClientRect().top,
+        grid: document.querySelector(".search-results")?.getAttribute("style"),
+      })
+      if (window.__focusFrames.length < 60) requestAnimationFrame(sample)
+    }
+    requestAnimationFrame(sample)
+  })
   await page.addStyleTag({ content: ".result-folder { line-height: 36px; }" })
   await new Promise((r) => setTimeout(r, 200))
   await reveal("b499")
@@ -96,6 +108,7 @@ try {
       scrollY,
       height: innerHeight,
       scrollHeight: document.documentElement.scrollHeight,
+      frames: window.__focusFrames,
     }))
     .catch(() => null)
   await writeFile(

@@ -22,6 +22,7 @@ export function BookmarkGrid({
   const [metrics, setMetrics] = useState({ columns: 1, stride: 100, gap: 6 })
   const [focus, setFocus] = useState(-1)
   const pending = useRef(-1)
+  const keyboardFocus = useRef(false)
   useLayoutEffect(() => {
     if (!ref.current) return
     const element = ref.current
@@ -91,38 +92,39 @@ export function BookmarkGrid({
     }
   }, [focus, start, end])
   useLayoutEffect(() => {
+    if (focus < 0) return
+    const cancel = () => {
+      keyboardFocus.current = false
+      pending.current = -1
+    }
+    const events = ["wheel", "touchstart", "pointerdown", "keydown"]
+    for (const event of events)
+      window.addEventListener(event, cancel, { capture: true, passive: true })
+    return () => {
+      for (const event of events)
+        window.removeEventListener(event, cancel, true)
+    }
+  }, [focus])
+  useLayoutEffect(() => {
     const element = document.activeElement
     if (
       !virtual ||
+      !keyboardFocus.current ||
       !(element instanceof HTMLElement) ||
       !ref.current?.contains(element)
     )
       return
-    // Let both measurement and virtual spacers settle before accepting the offset.
-    // Direct user input always takes precedence over this short focus correction.
-    let frame = 0,
-      remaining = 4
-    const cancel = () => {
-      cancelAnimationFrame(frame)
-      for (const event of ["wheel", "touchstart", "pointerdown", "keydown"])
-        window.removeEventListener(event, cancel, true)
-    }
-    const reveal = () => {
-      if (document.activeElement !== element || !element.isConnected)
-        return cancel()
+    // Reconcile focus with each committed range, including delayed spacer updates.
+    // Wheel, touch and pointer input cancel this before changing the viewport.
+    const bounds = element.getBoundingClientRect()
+    const margin = parseFloat(getComputedStyle(element).scrollMarginTop) || 88
+    if (bounds.top < margin || bounds.bottom > innerHeight)
       element.scrollIntoView({
         block: "nearest",
         inline: "nearest",
         behavior: "instant",
       })
-      if (--remaining) frame = requestAnimationFrame(reveal)
-      else cancel()
-    }
-    for (const event of ["wheel", "touchstart", "pointerdown", "keydown"])
-      window.addEventListener(event, cancel, { capture: true, passive: true })
-    reveal()
-    return cancel
-  }, [virtual, metrics])
+  }, [virtual, metrics, focus, start, end])
   return (
     <div
       ref={ref}
@@ -178,6 +180,7 @@ export function BookmarkGrid({
                       : 1)
         if (next < 0 || next >= items.length) return
         event.preventDefault()
+        keyboardFocus.current = true
         pending.current = next
         setFocus(next)
         const top =

@@ -106,24 +106,26 @@ export function BookmarkGrid({
     }
   }, [focus])
   useLayoutEffect(() => {
-    const element = document.activeElement
-    if (
-      !virtual ||
-      !keyboardFocus.current ||
-      !(element instanceof HTMLElement) ||
-      !ref.current?.contains(element)
-    )
-      return
+    if (!virtual) return
     // Reconcile focus with each committed range, including delayed spacer updates.
     // Wheel, touch and pointer input cancel this before changing the viewport.
-    const bounds = element.getBoundingClientRect()
-    const margin = parseFloat(getComputedStyle(element).scrollMarginTop) || 88
-    if (bounds.top < margin || bounds.bottom > innerHeight)
-      element.scrollIntoView({
-        block: "nearest",
-        inline: "nearest",
-        behavior: "instant",
-      })
+    const frame = requestAnimationFrame(() => {
+      const element = document.activeElement
+      if (
+        !keyboardFocus.current ||
+        !(element instanceof HTMLElement) ||
+        !ref.current?.contains(element)
+      )
+        return
+      const bounds = element.getBoundingClientRect()
+      const margin = parseFloat(getComputedStyle(element).scrollMarginTop) || 88
+      const delta =
+        bounds.top < margin
+          ? bounds.top - margin
+          : Math.max(0, bounds.bottom - innerHeight)
+      if (delta) window.scrollBy({ top: delta, behavior: "instant" })
+    })
+    return () => cancelAnimationFrame(frame)
   }, [virtual, metrics, focus, start, end])
   return (
     <div

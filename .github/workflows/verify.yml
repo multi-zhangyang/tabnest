@@ -26,6 +26,9 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npm run test:virtual-focus
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
       - run: npm run test:performance
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}

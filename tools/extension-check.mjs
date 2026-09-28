@@ -6,6 +6,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 const browser = await launchBrowser({ pipe: true, enableExtensions: true })
 const errors = [],
   checks = []
+let page
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const clickText = async (page, selector, text) => {
   await page.waitForFunction(
@@ -25,14 +26,14 @@ const clickText = async (page, selector, text) => {
     selector,
     text
   )
-  await node.asElement().click()
+  await node.asElement().asLocator().click()
   await node.dispose()
   await delay(100)
 }
 try {
   const id = await browser.installExtension(resolve("dist"))
   const url = `chrome-extension://${id}/index.html`
-  const page = await browser.newPage()
+  page = await browser.newPage()
   page.on("pageerror", (error) => errors.push(error.message))
   await page.goto(url, { waitUntil: "networkidle0" })
   await page.waitForFunction(() =>
@@ -255,6 +256,23 @@ try {
   )
   assert.deepEqual(errors, [])
   console.log(JSON.stringify(report, null, 2))
+} catch (error) {
+  await mkdir("artifacts", { recursive: true })
+  await page
+    ?.screenshot({ path: "artifacts/extension-failure.png" })
+    .catch(() => {})
+  const state = await page
+    ?.evaluate(async () => ({
+      dialog: document.querySelector('[role="dialog"]')?.outerHTML,
+      focus: document.activeElement?.outerHTML.slice(0, 600),
+      tree: await chrome.bookmarks.getTree(),
+    }))
+    .catch(() => null)
+  await writeFile(
+    "artifacts/extension-failure.json",
+    JSON.stringify({ error: error.stack, checks, errors, state }, null, 2)
+  )
+  throw error
 } finally {
   await browser.close()
 }

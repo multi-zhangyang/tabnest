@@ -28,7 +28,9 @@ export function BookmarkGrid({
     const measure = () => {
       const style = getComputedStyle(element)
       const columns = style.gridTemplateColumns.split(" ").length
-      const first = element.querySelector<HTMLElement>(".bookmark-grid-item")
+      const first = element.querySelector<HTMLElement>(
+        ".bookmark-grid-item:not([data-pinned])"
+      )
       const stride =
         (first?.getBoundingClientRect().height || 82) +
         (parseFloat(style.rowGap) || 0)
@@ -88,6 +90,21 @@ export function BookmarkGrid({
       pending.current = -1
     }
   }, [focus, start, end])
+  useLayoutEffect(() => {
+    // Fonts and window changes can invalidate the initial keyboard scroll offset.
+    // Only react to measured geometry, so ordinary wheel scrolling stays free.
+    const element = document.activeElement
+    if (
+      virtual &&
+      element instanceof HTMLElement &&
+      ref.current?.contains(element)
+    )
+      element.scrollIntoView({
+        block: "nearest",
+        inline: "nearest",
+        behavior: "instant",
+      })
+  }, [virtual, metrics])
   return (
     <div
       ref={ref}
@@ -162,6 +179,7 @@ export function BookmarkGrid({
           <div
             className="bookmark-grid-item"
             data-grid-index={index}
+            data-pinned={index === pinned || undefined}
             key={items[index].id}
             style={
               index === pinned

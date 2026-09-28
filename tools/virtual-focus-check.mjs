@@ -49,6 +49,16 @@ try {
   await showSearchResults(page, "站点")
   await page.evaluate(() => {
     window.__focusEvents = []
+    const scrollBy = window.scrollBy.bind(window)
+    window.scrollBy = (...args) => {
+      const before = window.scrollY
+      scrollBy(...args)
+      window.__focusEvents.push({
+        type: "scroll-correction", args, before, after: window.scrollY,
+        scrollHeight: document.documentElement.scrollHeight,
+        target: document.activeElement?.getBoundingClientRect().toJSON(),
+      })
+    }
     for (const type of ["keydown", "pointerdown", "wheel", "focusin", "focusout"])
       window.addEventListener(type, (event) => {
         window.__focusEvents.push({

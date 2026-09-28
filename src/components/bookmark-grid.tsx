@@ -115,7 +115,9 @@ export function BookmarkGrid({
   }, [focus])
   useLayoutEffect(() => {
     if (!virtual || focus < 0 || !ref.current) return
-    const frame = requestAnimationFrame(() => {
+    let frame = 0
+    const reveal = () => {
+      frame = 0
       const element = document.activeElement
       if (
         !keyboardFocus.current ||
@@ -130,8 +132,19 @@ export function BookmarkGrid({
           ? Math.floor(bounds.top - margin)
           : Math.max(0, Math.ceil(bounds.bottom - innerHeight))
       if (delta) window.scrollBy({ top: delta, behavior: "instant" })
-    })
-    return () => cancelAnimationFrame(frame)
+    }
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(reveal)
+    }
+    // The browser can clamp an initial scroll against the previous scroll extent.
+    // Reconcile after it reports the new canvas size, without following scrolls.
+    const observer = new ResizeObserver(schedule)
+    observer.observe(ref.current, { box: "border-box" })
+    schedule()
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
   }, [virtual, metrics, focus])
   return (
     <div

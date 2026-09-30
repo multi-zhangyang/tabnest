@@ -13,6 +13,78 @@ try {
   const setup = await browser.newPage()
   await setup.goto(url)
   await setup.waitForSelector('.main-tabs[data-ready="true"]')
+  await setup.evaluate(async () => {
+    await chrome.bookmarks.create({
+      parentId: "1",
+      title: "Startup fixture",
+      url: "https://example.com/",
+    })
+  })
+  for (const theme of ["light", "dark"]) {
+    await setup.evaluate((theme) => localStorage.setItem("theme", theme), theme)
+    const page = await browser.newPage()
+    page.on("pageerror", (e) => errors.push(e.message))
+    await page.evaluateOnNewDocument(() => {
+      window.__surfaceFrames = []
+      const sample = () => {
+        const root = document.getElementById("root")
+        const card = document.querySelector(".heat-cell, .section-card")
+        window.__surfaceFrames.push({
+          background: getComputedStyle(document.documentElement)
+            .backgroundColor,
+          phase: document.documentElement.dataset.startup,
+          opacity: root ? Number(getComputedStyle(root).opacity) : 0,
+          loading: !!document.querySelector(".loading-grid"),
+          bounds: card?.getBoundingClientRect().toJSON(),
+        })
+        requestAnimationFrame(sample)
+      }
+      requestAnimationFrame(sample)
+    })
+    await page.goto("chrome://newtab")
+    await page.waitForFunction(
+      () =>
+        document.documentElement.dataset.startup === "ready" &&
+        Number(getComputedStyle(document.getElementById("root")).opacity) === 1
+    )
+    const frames = await page.evaluate(() => window.__surfaceFrames)
+    assert.ok(
+      frames.every(
+        (f) =>
+          f.background ===
+          (theme === "dark" ? "rgb(17, 17, 17)" : "rgb(245, 245, 245)")
+      ),
+      "Startup painted the wrong background"
+    )
+    assert.ok(
+      frames.filter((f) => f.phase === "pending").every((f) => f.opacity === 0),
+      "Unfinished layout was revealed"
+    )
+    assert.ok(
+      frames.every((f) => !f.loading || f.opacity === 0),
+      "Loading placeholders flashed"
+    )
+    for (let i = 1; i < frames.length; i++)
+      assert.ok(
+        frames[i].opacity >= frames[i - 1].opacity - 0.001,
+        "Startup visibility reversed"
+      )
+    const visible = frames.filter((f) => f.phase === "ready" && f.bounds)
+    assert.ok(
+      visible.every((f) =>
+        ["x", "y", "width", "height"].every(
+          (k) => Math.abs(f.bounds[k] - visible[0].bounds[k]) < 0.1
+        )
+      ),
+      "Geometry shifted during startup reveal"
+    )
+    checks.push({
+      name: "steady-background-single-reveal",
+      theme,
+      frames: frames.length,
+    })
+    await page.close()
+  }
   for (const layout of ["zones", "heat"])
     for (const latency of [0, 300]) {
       await setup.evaluate(async (layout) => {
@@ -46,12 +118,14 @@ try {
                   .querySelector('[aria-selected="true"]')
                   ?.getAttribute("aria-label") || null,
               transitions: nav.getAnimations({ subtree: true }).length,
-              animations: nav.getAnimations({ subtree: true }).map((animation) => ({
-                type: animation.constructor.name,
-                property: animation.transitionProperty,
-                name: animation.animationName,
-                target: animation.effect?.target?.outerHTML?.slice(0, 700),
-              })),
+              animations: nav
+                .getAnimations({ subtree: true })
+                .map((animation) => ({
+                  type: animation.constructor.name,
+                  property: animation.transitionProperty,
+                  name: animation.animationName,
+                  target: animation.effect?.target?.outerHTML?.slice(0, 700),
+                })),
             })
           requestAnimationFrame(sample)
         }
@@ -81,11 +155,17 @@ try {
         checks.push({ layout, latency, navigation, frames: frames.length })
         const themeAnimations = await page.evaluate(() => {
           document.documentElement.classList.toggle("dark")
-          const animations = document.querySelector(".main-tabs").getAnimations({ subtree: true }).length
+          const animations = document
+            .querySelector(".main-tabs")
+            .getAnimations({ subtree: true }).length
           document.documentElement.classList.toggle("dark")
           return animations
         })
-        assert.equal(themeAnimations, 0, "Late theme styles must not animate initial navigation")
+        assert.equal(
+          themeAnimations,
+          0,
+          "Late theme styles must not animate initial navigation"
+        )
       }
       await page.close()
     }
@@ -149,7 +229,10 @@ try {
   await peer.goto(url)
   await setup.bringToFront()
   await setup.locator('[aria-label="书签拼图"]').click()
-  assert.equal(await setup.$eval(".main-tabs", (nav) => nav.dataset.interacted), "true")
+  assert.equal(
+    await setup.$eval(".main-tabs", (nav) => nav.dataset.interacted),
+    "true"
+  )
   await peer.bringToFront()
   await peer.waitForSelector('[aria-label="书签拼图"][aria-selected="true"]')
   checks.push({ name: "manual-switch-cross-tab" })
@@ -162,11 +245,26 @@ try {
   console.log(JSON.stringify({ passed: checks.length, errors }))
 } catch (error) {
   await mkdir("artifacts", { recursive: true })
-  const frames = await currentPage?.evaluate(() => window.__navigationFrames).catch(() => null)
-  await writeFile("artifacts/startup-failure.json", JSON.stringify({
-    sample: currentSample, error: error.stack, frames, checks, errors,
-  }, null, 2))
-  await currentPage?.screenshot({ path: "artifacts/startup-failure.png" }).catch(() => {})
+  const frames = await currentPage
+    ?.evaluate(() => window.__navigationFrames)
+    .catch(() => null)
+  await writeFile(
+    "artifacts/startup-failure.json",
+    JSON.stringify(
+      {
+        sample: currentSample,
+        error: error.stack,
+        frames,
+        checks,
+        errors,
+      },
+      null,
+      2
+    )
+  )
+  await currentPage
+    ?.screenshot({ path: "artifacts/startup-failure.png" })
+    .catch(() => {})
   throw error
 } finally {
   await browser.close()

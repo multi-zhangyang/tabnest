@@ -77,7 +77,7 @@ export function ImportDialog({
         }
       )
       await onSaved()
-      toast.success("书签已导入")
+      toast.success(plan.format === "recovery" ? "数据已恢复" : "书签已导入")
       onClose()
     } catch (cause) {
       if (
@@ -101,8 +101,8 @@ export function ImportDialog({
       busy={busy}
       onClose={onClose}
       onSubmit={submit}
-      submitLabel="导入为新文件夹"
-      submitDisabled={reading || !data}
+      submitLabel={plan?.format === "recovery" ? "恢复" : "导入为新文件夹"}
+      submitDisabled={reading || !data || (plan?.format === "recovery" && !data.folders.length && !restore)}
     >
       <FieldGroup>
         <Field data-invalid={!!error || undefined}>
@@ -155,7 +155,7 @@ export function ImportDialog({
           </div>
         )}
         {busy && <Progress value={progress} aria-label="导入进度" />}
-        <Field>
+        {plan?.format !== "recovery" || !!data?.folders.length ? <Field>
           <FieldLabel htmlFor="import-parent">导入位置</FieldLabel>
           <FolderPicker
             id="import-parent"
@@ -164,9 +164,9 @@ export function ImportDialog({
             onChange={setParentId}
             disabled={busy}
           />
-        </Field>
+        </Field> : null}
         {error && <FieldError role="alert">{error}</FieldError>}
-        {data?.preferences && (
+        {(data?.preferences || (plan?.recoveryPreferences && Object.keys(plan.recoveryPreferences).length > 0)) && (
           <Field orientation="horizontal">
             <FieldLabel htmlFor="restore-preferences">
               同时恢复热度与设置
@@ -179,6 +179,7 @@ export function ImportDialog({
             />
           </Field>
         )}
+        {!!plan?.recoveryFailures?.length && <FieldError role="alert">{plan.recoveryFailures.join("、")}无法恢复</FieldError>}
       </FieldGroup>
     </EditorDialog>
   )

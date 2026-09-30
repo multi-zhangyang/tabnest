@@ -110,6 +110,9 @@ try {
   checks.push("actual-clicks-and-cross-tab-heat")
   await page.click('[aria-label="文件夹视图"]')
   await page.waitForSelector(".section-board")
+  await page.waitForFunction(
+    () => !document.querySelector(".view-panel[data-switching]")
+  )
   assert.equal(
     await page.$$eval(".section-bookmarks .bookmark-card", (els) => els.length),
     2
@@ -158,7 +161,8 @@ try {
   await page.click('[aria-label="文件夹列表"]')
   await otherPage.bringToFront()
   await otherPage.waitForSelector('.section-board[data-layout="list"]')
-  await otherPage.click('[aria-label="收起文件夹 子文件夹"]')
+  await otherPage.waitForFunction(() => !document.querySelector(".view-panel[data-switching]"))
+  await otherPage.locator('[aria-label="收起文件夹 子文件夹"]').click()
   await page.bringToFront()
   await page.waitForSelector('[aria-label="展开文件夹 子文件夹"]')
   await page.reload({ waitUntil: "networkidle0" })

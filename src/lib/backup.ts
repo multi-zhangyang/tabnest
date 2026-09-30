@@ -19,11 +19,16 @@ import {
   validateClicks,
 } from "./preferences"
 import type { AppSettings } from "./types"
+import { loadRecent, mergeRecent, validateRecent } from "./recent"
+import type { RecentOpen } from "./recent"
+import { readTheme, saveTheme } from "./theme-storage"
+import { parseRecoveryFile } from "./recovery-file"
 
 export type BackupPreferences = {
   settings: AppSettings
   clicks: Record<string, number>
   theme: "light" | "dark" | "system"
+  recent?: RecentOpen[]
 }
 export type BackupData = BookmarkData & { preferences?: BackupPreferences }
 
@@ -45,11 +50,18 @@ export function createBackup(data: BackupData): BookmarkBackup {
 }
 
 export async function createFullBackup(data: BookmarkData) {
-  const [settings, clicks] = await Promise.all([loadSettings(), loadClicks()])
-  const storedTheme = localStorage.getItem("theme")
+  const [settings, clicks, recent] = await Promise.all([
+    loadSettings(),
+    loadClicks(),
+    loadRecent().catch(() => []),
+  ])
+  const storedTheme = readTheme()
   const theme =
     storedTheme === "light" || storedTheme === "system" ? storedTheme : "dark"
-  return createBackup({ ...data, preferences: { settings, clicks, theme } })
+  return createBackup({
+    ...data,
+    preferences: { settings, clicks, recent, theme },
+  })
 }
 
 export type ImportIssue = {
@@ -62,7 +74,9 @@ export type ImportIssue = {
 export type ImportPlan = {
   data: BackupData
   issues: ImportIssue[]
-  format: "json" | "html"
+  format: "json" | "html" | "recovery"
+  recoveryPreferences?: Partial<BackupPreferences>
+  recoveryFailures?: string[]
 }
 
 export function parseBackup(text: string, issues?: ImportIssue[]): BackupData {
@@ -200,6 +214,9 @@ export function parseBackup(text: string, issues?: ImportIssue[]): BackupData {
       settings: clampSettings(prefs.settings),
       clicks,
       theme: prefs.theme,
+      ...(prefs.recent === undefined
+        ? {}
+        : { recent: validateRecent(prefs.recent) }),
     }
   }
   return data
@@ -212,8 +229,9 @@ async function restorePreferences(
 ) {
   if (!enabled || !data.preferences) return
   try {
-    const { settings, clicks, theme } = data.preferences
+    const { settings, clicks, theme, recent } = data.preferences
     await mergeClicks(clicks)
+    if (recent) await mergeRecent(recent)
     await saveSettings({
       ...settings,
       activeFolderId: ids.get(settings.activeFolderId) || "",
@@ -221,7 +239,7 @@ async function restorePreferences(
         ids.has(id) ? [ids.get(id)!] : []
       ),
     })
-    localStorage.setItem("theme", theme)
+    saveTheme(theme)
     if (typeof window !== "undefined")
       window.dispatchEvent(new Event("tabnest:theme"))
   } catch (cause) {
@@ -393,6 +411,14 @@ export function importBackup(
 }
 
 export function planJsonImport(text: string): ImportPlan {
+  if (new TextEncoder().encode(text).length > 10 * 1024 * 1024) throw new Error("文件不能超过 10 MB")
+  const raw = JSON.parse(text)
+  if (raw?.format === "tabnest-recovery") {
+    const recovery = parseRecoveryFile(raw)
+    const issues: ImportIssue[] = []
+    const data = recovery.data.folders.length ? parseBackup(JSON.stringify(createBackup(recovery.data)), issues) : recovery.data
+    return { data, issues, format: "recovery", recoveryPreferences: recovery.preferences, recoveryFailures: recovery.failures }
+  }
   const issues: ImportIssue[] = []
   return { data: parseBackup(text, issues), issues, format: "json" }
 }
@@ -404,6 +430,7 @@ export function executeImportPlan(
   skipped: string[] = [],
   progress?: (completed: number, total: number) => void
 ) {
+  if (plan.format === "recovery") return executeRecoveryPlan(plan, parentId, restore, progress)
   const omit = new Set(skipped)
   return importBackup(
     {
@@ -417,4 +444,18 @@ export function executeImportPlan(
     restore,
     progress
   )
+}
+async function executeRecoveryPlan(plan: ImportPlan, parentId: string | undefined, restore: boolean, progress?: (completed: number, total: number) => void) {
+  let root: string | undefined
+  if (plan.data.folders.length) root = await importBackup(plan.data, parentId, false, progress)
+  if (restore && plan.recoveryPreferences) {
+    const { clicks, recent, settings, theme } = plan.recoveryPreferences
+    try {
+      if (clicks) await mergeClicks(clicks)
+      if (recent) await mergeRecent(recent)
+      if (settings) await saveSettings({ ...settings, activeFolderId: "", collapsedSections: [] })
+      if (theme) { saveTheme(theme); window.dispatchEvent(new Event("tabnest:theme")) }
+    } catch (cause) { throw new AppError("partial-write", "恢复未全部完成", { cause }) }
+  }
+  return root
 }

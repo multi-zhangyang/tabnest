@@ -1,5 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
+import { toast } from "sonner"
+import { readTheme, saveTheme } from "@/lib/theme-storage"
 
 type Theme = "dark" | "light" | "system"
 type ResolvedTheme = "dark" | "light"
@@ -81,11 +83,11 @@ export function ThemeProvider({
   children,
   defaultTheme = "system",
   storageKey = "theme",
-  disableTransitionOnChange = true,
+  disableTransitionOnChange = false,
   ...props
 }: ThemeProviderProps) {
   const [theme, setThemeState] = React.useState<Theme>(() => {
-    const storedTheme = localStorage.getItem(storageKey)
+    const storedTheme = readTheme(storageKey, defaultTheme)
     if (isTheme(storedTheme)) {
       return storedTheme
     }
@@ -95,12 +97,16 @@ export function ThemeProvider({
 
   const setTheme = React.useCallback(
     (nextTheme: Theme) => {
-      localStorage.setItem(storageKey, nextTheme)
-      setThemeState(nextTheme)
+      try { saveTheme(nextTheme, storageKey); setThemeState(nextTheme) }
+      catch { toast.error("主题保存失败") }
     },
     [storageKey]
   )
 
+  const applied = React.useRef(false)
+  const themeTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined
+  )
   const applyTheme = React.useCallback(
     (nextTheme: Theme) => {
       const root = document.documentElement
@@ -110,8 +116,29 @@ export function ThemeProvider({
         ? disableTransitionsTemporarily()
         : null
 
+      if (
+        applied.current &&
+        !matchMedia("(prefers-reduced-motion: reduce)").matches
+      ) {
+        clearTimeout(themeTimer.current)
+        root.dataset.themeTransition = "true"
+        themeTimer.current = setTimeout(
+          () => delete root.dataset.themeTransition,
+          280
+        )
+      }
+      applied.current = true
       root.classList.remove("light", "dark")
       root.classList.add(resolvedTheme)
+      root.style.colorScheme = resolvedTheme
+      root.style.backgroundColor =
+        resolvedTheme === "dark" ? "#111111" : "#f5f5f5"
+      root
+        .querySelector('meta[name="theme-color"]')
+        ?.setAttribute(
+          "content",
+          resolvedTheme === "dark" ? "#111111" : "#f5f5f5"
+        )
 
       if (restoreTransitions) {
         restoreTransitions()
@@ -167,7 +194,8 @@ export function ThemeProvider({
                 ? "light"
                 : "dark"
 
-        localStorage.setItem(storageKey, nextTheme)
+        try { saveTheme(nextTheme, storageKey) }
+        catch { toast.error("主题保存失败"); return currentTheme }
         return nextTheme
       })
     }
@@ -199,7 +227,7 @@ export function ThemeProvider({
 
     window.addEventListener("storage", handleStorageChange)
     const restore = () => {
-      const value = localStorage.getItem(storageKey)
+      const value = readTheme(storageKey, defaultTheme)
       if (isTheme(value)) setThemeState(value)
     }
     window.addEventListener("tabnest:theme", restore)

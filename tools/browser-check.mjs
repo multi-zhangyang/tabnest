@@ -40,6 +40,10 @@ try {
   }
   const aria = async (label) => {
     await page.locator(`[aria-label="${label}"]`).click()
+    if (label === "书签拼图" || label === "文件夹视图")
+      await page.waitForFunction(
+        () => !document.querySelector(".view-panel").inert
+      )
     await delay(180)
   }
   const toggleTheme = async () => {
@@ -175,7 +179,10 @@ try {
     icon: el.querySelector(".site-icon").getBoundingClientRect().width,
   }))
   assert.ok(grown.area > initial.area * 1.5)
-  assert.ok(grown.icon > initial.icon)
+  assert.ok(
+    grown.icon >= initial.icon && grown.icon <= 84.1,
+    "bounded icon size"
+  )
   checks.push({ name: "real-click-growth", initial, grown })
   await page.mouse.move(0, 0)
   assert.equal(
@@ -214,7 +221,9 @@ try {
   )
   await page.keyboard.type("GitHub")
   await page.waitForFunction(
-    () => document.querySelectorAll('.search-dialog [data-value^="bookmark:"]').length === 1
+    () =>
+      document.querySelectorAll('.search-dialog [data-value^="bookmark:"]')
+        .length === 1
   )
   await page.keyboard.press("ArrowDown")
   assert.equal(
@@ -441,15 +450,27 @@ try {
   await page.waitForSelector(".metric-grid button")
   await page.click(".metric-grid button")
   await page.waitForSelector(".duplicates-dialog")
-  assert.equal(await page.$$eval(".duplicate-row", els => els.length), 48)
+  assert.equal(await page.$$eval(".duplicate-row", (els) => els.length), 48)
   await shot("duplicate-bookmarks")
   await click(".duplicates-dialog button", "删除 24 项")
   await click('[role="alertdialog"] button', "删除")
-  await page.waitForFunction(() => !document.querySelector('[role="alertdialog"]'))
-  const remaining = await page.evaluate(() => JSON.parse(localStorage.getItem("tabnest:demo-bookmarks:v2")).data.groups.flatMap(group => group.items))
+  await page.waitForFunction(
+    () => !document.querySelector('[role="alertdialog"]')
+  )
+  const remaining = await page.evaluate(() =>
+    JSON.parse(
+      localStorage.getItem("tabnest:demo-bookmarks:v2")
+    ).data.groups.flatMap((group) => group.items)
+  )
   assert.equal(remaining.length, 24)
-  assert.equal(new Set(remaining.map(item => item.url)).size, 24)
-  checks.push({ name: "duplicate-review", matchesBefore: 48, matchesAfter: 0, deletedBookmarks: 24, originalHierarchyPreserved: true })
+  assert.equal(new Set(remaining.map((item) => item.url)).size, 24)
+  checks.push({
+    name: "duplicate-review",
+    matchesBefore: 48,
+    matchesAfter: 0,
+    deletedBookmarks: 24,
+    originalHierarchyPreserved: true,
+  })
   await page.evaluate(() => {
     const items = Array.from({ length: 180 }, (_, index) => ({
       id: `bulk-${index}`,

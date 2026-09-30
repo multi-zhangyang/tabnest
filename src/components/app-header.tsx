@@ -8,6 +8,8 @@ import {
   Search,
   Settings2,
 } from "lucide-react"
+import type { CSSProperties } from "react"
+import type { LayoutMode } from "@/lib/types"
 import type { BookmarkSearch } from "@/hooks/use-bookmark-search"
 import { Button } from "@/components/ui/button"
 import { TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -27,6 +29,7 @@ import {
 
 export function AppHeader({
   ready,
+  layout,
   search,
   onAdd,
   onNewFolder,
@@ -35,6 +38,7 @@ export function AppHeader({
   writable,
 }: {
   ready: boolean
+  layout: LayoutMode
   search: BookmarkSearch
   onAdd: () => void
   onNewFolder: () => void
@@ -73,7 +77,18 @@ export function AppHeader({
         onPointerDownCapture={() => ready && setInteracted(true)}
         onKeyDownCapture={() => ready && setInteracted(true)}
       >
-        <TabsList key={ready ? "ready" : "pending"} aria-label="主导航">
+        <TabsList
+          className="navigation-segment"
+          style={
+            {
+              "--active": layout === "zones" ? 1 : 0,
+              "--segments": 2,
+            } as CSSProperties
+          }
+          key={ready ? "ready" : "pending"}
+          aria-label="主导航"
+        >
+          <span className="segment-indicator" aria-hidden="true" />
           <TabsTrigger value="heat" aria-label="书签拼图">
             <PanelsTopLeft data-icon="inline-start" />
             书签拼图

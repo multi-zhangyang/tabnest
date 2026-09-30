@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, writeFile,readFile } from "node:fs/promises"
+import {resolve} from 'node:path'
 import { launchBrowser, openPreview, servePreview } from "./runtime.mjs"
 import { openSearch } from "./search-helpers.mjs"
 
@@ -110,6 +111,8 @@ const preview = await servePreview(),
   errors = []
 try {
   const page = await browser.newPage()
+  const store=process.env.STORE_SCREENSHOTS==='1'
+  if(store)await page.setViewport({width:1280,height:800,deviceScaleFactor:1})
   page.on("pageerror", (e) => errors.push(e.message))
   await page.setRequestInterception(true)
   page.on("request", (request) => {
@@ -142,6 +145,7 @@ try {
     { groups, folders, clicks }
   )
   await mkdir("docs/images", { recursive: true })
+  if(store)await mkdir('docs/store/screenshots',{recursive:true})
   const shots = []
   async function capture(name) {
     await page.evaluate(async () => {
@@ -159,6 +163,7 @@ try {
     )
     const path = `docs/images/${name}.webp`
     await page.screenshot({ path, type: "webp", quality: 88 })
+    if(store)await page.screenshot({path:`docs/store/screenshots/${name}.png`})
     shots.push(path)
   }
   for (const theme of ["light", "dark"]) {
@@ -200,7 +205,7 @@ try {
         source: "tools/docs-screenshots.mjs",
         personalBookmarks: false,
         count: 24,
-        viewport: "1440 × 900",
+        viewport: store?'1280 × 800':"1440 × 900",
         shots,
         errors,
       },
@@ -209,6 +214,10 @@ try {
     )
   )
   console.log(JSON.stringify({ screenshots: shots, errors }))
+  if(store){
+    const candidate=JSON.parse(await readFile('artifacts/candidate.json','utf8'))
+    await writeFile('docs/store/screenshots/metadata.json',JSON.stringify({version:candidate.version,buildId:candidate.buildId,extensionSha256:candidate.sha256,viewport:'1280×800',fixture:'public sample bookmarks',personalBookmarks:false,files:shots.map(path=>resolve(path).split(/[\\/]/).at(-1).replace('.webp','.png'))},null,2))
+  }
 } finally {
   await browser.close()
   await preview.close()

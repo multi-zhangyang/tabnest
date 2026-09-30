@@ -429,15 +429,22 @@ export function subscribeBookmarks(callback: () => void) {
     chrome.bookmarks.onChildrenReordered,
     chrome.bookmarks.onImportEnded,
   ]
+  let importing = false
   let timer: ReturnType<typeof setTimeout>
   const listener = () => {
     clearTimeout(timer)
-    timer = setTimeout(callback, 80)
+    if (!importing) timer = setTimeout(callback, 80)
   }
+  const startImport = () => { importing = true; clearTimeout(timer) }
+  const endImport = () => { importing = false; listener() }
+  chrome.bookmarks.onImportBegan.addListener(startImport)
+  chrome.bookmarks.onImportEnded.addListener(endImport)
   events.forEach((event) => event.addListener(listener))
   return () => {
     clearTimeout(timer)
     events.forEach((event) => event.removeListener(listener))
+    chrome.bookmarks.onImportBegan.removeListener(startImport)
+    chrome.bookmarks.onImportEnded.removeListener(endImport)
   }
 }
 

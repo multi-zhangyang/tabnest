@@ -46,6 +46,8 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { useBookmarks } from "@/hooks/use-bookmarks"
 import { useBookmarkSearch } from "@/hooks/use-bookmark-search"
 import { useLibraryActions } from "@/hooks/use-library-actions"
+import { useStartupReveal } from "@/hooks/use-startup-reveal"
+import { useViewTransition } from "@/hooks/use-view-transition"
 import { defaultFolderId } from "@/lib/bookmarks"
 import { descendants, rootFolder } from "@/lib/folders"
 import type { LayoutMode } from "@/lib/types"
@@ -70,12 +72,15 @@ export default function App() {
     settingsReady,
     patchSettings,
     clicks,
+    recent,
     recordClick,
     loading,
     error,
     reload,
     retry,
   } = useBookmarks()
+  useStartupReveal(!loading && settingsReady)
+  const displayedLayout = useViewTransition(settings.layout, settingsReady)
   const [utility, setUtility] = useState<
     "settings" | "stats" | "recovery" | "duplicates" | null
   >(null)
@@ -108,15 +113,17 @@ export default function App() {
     items,
     folders,
     settings.sort,
-    library.actions.open
+    library.actions.open,
+    clicks,
+    recent
   )
   const defaultRoot = rootFolder(folders, defaultFolderId(folders))
   const activeRoot =
-    settings.layout === "zones"
+    displayedLayout === "zones"
       ? rootFolder(folders, settings.activeFolderId) || defaultRoot
       : defaultRoot
   const showGroups =
-    !search.active && settings.layout === "zones" && !!folders.length
+    !search.active && displayedLayout === "zones" && !!folders.length
   const [located, setLocated] = useState("")
   function locateFolder(id: string) {
     setUtility(null)
@@ -181,6 +188,7 @@ export default function App() {
         >
           <AppHeader
             ready={settingsReady}
+            layout={settings.layout}
             search={search}
             onAdd={() => library.add(activeRoot?.id)}
             onNewFolder={() => library.editFolder({ parentId: activeRoot?.id })}
@@ -192,13 +200,15 @@ export default function App() {
           />
           <main className="view-panel">
             <TabsContent
-              value={settingsReady ? settings.layout : ""}
+              key={displayedLayout}
+              forceMount
+              value={settingsReady ? displayedLayout : ""}
               className="main-content"
             >
               <h1 className="sr-only">
                 {search.active
                   ? "搜索书签"
-                  : settings.layout === "heat"
+                  : displayedLayout === "heat"
                     ? "书签拼图"
                     : "书签文件夹"}
               </h1>

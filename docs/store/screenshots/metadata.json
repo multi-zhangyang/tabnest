@@ -1,0 +1,16 @@
+{
+  "version": "2.7.1",
+  "buildId": "cc7511d4e5b378d5c9a68ee7f57f13e52beae3ece128da103fb2677c3624bee5",
+  "extensionSha256": "d9dce99d4aba244c6b1dcb024420c15bef954d06b18e66ee65decdf645ce09a7",
+  "viewport": "1280×800",
+  "fixture": "public sample bookmarks",
+  "personalBookmarks": false,
+  "files": [
+    "mosaic-light.png",
+    "folders-light.png",
+    "mosaic-dark.png",
+    "folders-dark.png",
+    "search-dark.png",
+    "editor-dark.png"
+  ]
+}

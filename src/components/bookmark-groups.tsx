@@ -212,7 +212,7 @@ export const BookmarkGroups = memo(function BookmarkGroups({
           </ToggleGroup>
         </div>
       </div>
-      <TabsContent value={active?.id || ""}>
+      <TabsContent key={active?.id} value={active?.id || ""}>
         {blocks.length ? (
           <SectionBoard blocks={blocks} groups={byGroup} settings={settings}>
             {(folder) => {

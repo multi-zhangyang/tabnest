@@ -64,7 +64,7 @@ export default function SearchDialog({
     search.closePalette()
     requestAnimationFrame(action)
   }
-  const bookmarks = search.query.trim() ? search.results.slice(0, 50) : []
+  const bookmarks = search.pending ? [] : search.query.trim() ? search.results.slice(0, 50) : search.recentResults
   return (
     <Dialog
       open
@@ -135,7 +135,7 @@ export default function SearchDialog({
             )}
             {!search.pending && <CommandEmpty>没有匹配结果</CommandEmpty>}
             {!!bookmarks.length && (
-              <CommandGroup heading="书签">
+              <CommandGroup heading={search.query.trim() ? "书签" : "最近打开"}>
                 {bookmarks.map((item) => (
                   <CommandItem
                     value={`bookmark:${item.id}`}
@@ -160,7 +160,7 @@ export default function SearchDialog({
                 ))}
               </CommandGroup>
             )}
-            {!!search.query.trim() && !!search.results.length && (
+            {!search.pending && !!search.query.trim() && !!search.results.length && (
               <CommandGroup>
                 <CommandItem value="all-results" onSelect={search.showAll}>
                   <Search />
@@ -170,7 +170,7 @@ export default function SearchDialog({
                 </CommandItem>
               </CommandGroup>
             )}
-            {!!search.folderResults.length && (
+            {!search.pending && !!search.folderResults.length && (
               <>
                 <CommandSeparator />
                 <CommandGroup heading="文件夹">

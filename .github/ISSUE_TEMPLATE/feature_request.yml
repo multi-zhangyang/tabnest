@@ -1,0 +1,19 @@
+name: 改进建议
+description: 提出使用体验或功能改进
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 版本与构建编号
+  - type: textarea
+    id: problem
+    attributes:
+      label: 使用场景与遇到的问题
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 希望达到的效果
+    validations:
+      required: true

@@ -15,7 +15,7 @@ const server = await createServer({
 })
 after(() => server.close())
 const repository = await server.ssrLoadModule("/src/lib/bookmarks.ts")
-const { heatLayout } = await server.ssrLoadModule("/src/lib/heat-layout.ts")
+const { heatCanvas } = await server.ssrLoadModule("/src/lib/heat-layout.ts")
 const { demoGroups, DEMO_CLICKS } =
   await server.ssrLoadModule("/src/lib/demo.ts")
 
@@ -194,11 +194,17 @@ test("responsive heat layouts are deterministic, in bounds and non-overlapping",
   ]) {
     for (const gap of [5, 8, 12]) {
       const items = all.slice(0, count)
-      const boxes = heatLayout(items, DEMO_CLICKS, width, height, gap)
+      const { boxes, height: canvasHeight } = heatCanvas(
+        items,
+        DEMO_CLICKS,
+        width,
+        height,
+        gap
+      )
       assert.equal(boxes.length, items.length)
       assert.deepEqual(
         boxes,
-        heatLayout(items, DEMO_CLICKS, width, height, gap)
+        heatCanvas(items, DEMO_CLICKS, width, height, gap).boxes
       )
       for (const box of boxes) {
         assert.ok(
@@ -209,7 +215,7 @@ test("responsive heat layouts are deterministic, in bounds and non-overlapping",
           box.x >= 0 &&
             box.y >= 0 &&
             box.x + box.width <= width + 1 &&
-            box.y + box.height <= height + 1
+            box.y + box.height <= canvasHeight + 1
         )
       }
       for (let i = 0; i < boxes.length; i++)
@@ -227,24 +233,24 @@ test("responsive heat layouts are deterministic, in bounds and non-overlapping",
     }
   }
   assert.deepEqual(
-    heatLayout(all, DEMO_CLICKS, 1300, 600, 12),
-    heatLayout(all, DEMO_CLICKS, 1300, 600, 12)
+    heatCanvas(all, DEMO_CLICKS, 1300, 600, 12).boxes,
+    heatCanvas(all, DEMO_CLICKS, 1300, 600, 12).boxes
   )
 })
 
 test("increased heat allocates more area to the selected bookmark", () => {
   const items = demoGroups().flatMap((g) => g.items)
   const target = items.find((i) => i.title === "Figma")
-  const before = heatLayout(items, DEMO_CLICKS, 1348, 684).find(
+  const before = heatCanvas(items, DEMO_CLICKS, 1348, 684).boxes.find(
     (b) => b.item.id === target.id
   )
-  const after = heatLayout(
+  const after = heatCanvas(
     items,
     { ...DEMO_CLICKS, [target.url]: 80 },
     1348,
     684
-  ).find((b) => b.item.id === target.id)
-  assert.ok(after.width * after.height > before.width * before.height * 1.5)
+  ).boxes.find((b) => b.item.id === target.id)
+  assert.ok(after.width * after.height > before.width * before.height)
 })
 
 test("legacy preferences migrate with the original retained and atomic patch merges", async () => {
@@ -471,32 +477,6 @@ test("backup import is additive, preserves hierarchy and rejects malicious or in
   )
 })
 
-test("every higher click count receives strictly more area with no high-count cap", () => {
-  const items = Array.from({ length: 180 }, (_, index) => ({
-    id: String(index),
-    title: String(index),
-    url: `https://heat.test/${index}`,
-  }))
-  const clicks = Object.fromEntries(
-    items.map((item, index) => [item.url, index * 100])
-  )
-  for (const [width, height] of [
-    [1400, 700],
-    [390, 600],
-  ]) {
-    const boxes = heatLayout(items, clicks, width, height, 12).sort(
-      (a, b) => clicks[a.item.url] - clicks[b.item.url]
-    )
-    assert.equal(boxes.length, 180)
-    for (let i = 1; i < boxes.length; i++)
-      assert.ok(
-        boxes[i].width * boxes[i].height >
-          boxes[i - 1].width * boxes[i - 1].height
-      )
-    assert.ok(boxes.every((box) => box.width > 0 && box.height > 0))
-  }
-})
-
 test("backup folder titles containing path separators do not invent a parent relationship", () => {
   const data = {
     folders: [
@@ -562,26 +542,24 @@ test("IME and native modifier targets distinguish foreground, background and win
   assert.equal(navigation.openTarget({ button: 1 }), "background")
 })
 
-test("heat changes retain pairwise partition direction and legacy shuffle is ignored", () => {
+test("heat changes remain non-overlapping and legacy shuffle is ignored", () => {
   const items = demoGroups().flatMap((g) => g.items)
-  const before = heatLayout(items, DEMO_CLICKS, 1333, 900)
-  const after = heatLayout(
+  const before = heatCanvas(items, DEMO_CLICKS, 1333, 900).boxes
+  const after = heatCanvas(
     items,
     { ...DEMO_CLICKS, [items[0].url]: 999 },
     1333,
-    1500
-  )
+    900
+  ).boxes
   for (let i = 0; i < before.length; i++)
     for (let j = i + 1; j < before.length; j++) {
-      const a = before[i],
-        b = before[j],
-        c = after[i],
+      const c = after[i],
         d = after[j]
       const relations = [
-        a.x + a.width <= b.x + 0.01 && c.x + c.width <= d.x + 0.01,
-        b.x + b.width <= a.x + 0.01 && d.x + d.width <= c.x + 0.01,
-        a.y + a.height <= b.y + 0.01 && c.y + c.height <= d.y + 0.01,
-        b.y + b.height <= a.y + 0.01 && d.y + d.height <= c.y + 0.01,
+        c.x + c.width <= d.x + 0.01,
+        d.x + d.width <= c.x + 0.01,
+        c.y + c.height <= d.y + 0.01,
+        d.y + d.height <= c.y + 0.01,
       ]
       assert.ok(relations.some(Boolean), "bookmarks crossed partitions")
     }

@@ -14,7 +14,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   layout: "heat",
   fontScale: "m",
   cardScale: 1,
-  newTab: false,
+  newTab: true,
   onlineIcons: false,
   activeFolderId: "",
   folderLayout: "grid",
@@ -23,7 +23,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export function clampSettings(raw: unknown): AppSettings {
   const value =
     raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
-  const result = { ...DEFAULT_SETTINGS }
+  const result = { ...DEFAULT_SETTINGS, newTab: false }
   const enums = {
     sort: ["default", "name"],
     density: ["compact", "standard", "loose"],
@@ -64,26 +64,37 @@ export function saveSettings(patch: Partial<AppSettings>) {
     (current) => clampSettings({ ...current, ...patch })
   )
 }
+const validClickUrls = new Set<string>()
 export function validateClicks(raw: unknown): Record<string, number> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw))
     throw new Error("Invalid clicks")
   return Object.fromEntries(
     Object.entries(raw).filter(
-      ([key, value]) =>
-        Boolean(safeUrl(key)) &&
+      ([key, value]) => {
+        let valid = validClickUrls.has(key)
+        if (!valid && safeUrl(key)) {
+          valid = true
+          if (validClickUrls.size >= 25000) validClickUrls.clear()
+          validClickUrls.add(key)
+        }
+        return valid &&
         typeof value === "number" &&
         Number.isSafeInteger(value) &&
         value >= 0
+      }
     )
   )
 }
 const initialClicks = () => (isExtension ? {} : { ...DEMO_CLICKS })
+const clickDeltas = new WeakMap<Record<string, number>, string[]>()
+export const changedClickUrls = (clicks: Record<string, number>) => clickDeltas.get(clicks)
+export const markClickUrls = (clicks: Record<string, number>, urls: string[]) => clickDeltas.set(clicks, urls)
 export function loadClicks() {
   return readDocument(STORAGE_KEYS.clicks, initialClicks, validateClicks)
 }
-export function bumpClick(url: string) {
+export async function bumpClick(url: string) {
   if (!safeUrl(url)) throw new AppError("invalid-data", "网址无效")
-  return updateDocument(
+  const next = await updateDocument(
     STORAGE_KEYS.clicks,
     initialClicks,
     validateClicks,
@@ -92,6 +103,8 @@ export function bumpClick(url: string) {
       [url]: Math.min(Number.MAX_SAFE_INTEGER, (current[url] || 0) + 1),
     })
   )
+  clickDeltas.set(next, [url])
+  return next
 }
 
 export function mergeClicks(incoming: Record<string, number>) {

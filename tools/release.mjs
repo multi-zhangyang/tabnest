@@ -11,6 +11,8 @@ const pkg = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"))
 const manifest = JSON.parse(
   await readFile(resolve(dist, "manifest.json"), "utf8")
 )
+const build = JSON.parse(await readFile(resolve(dist, "build-info.json"), "utf8"))
+assert.equal(build.version, pkg.version)
 assert.equal(manifest.manifest_version, 3)
 assert.equal(manifest.version, pkg.version)
 assert.equal(manifest.chrome_url_overrides.newtab, "index.html")
@@ -74,11 +76,17 @@ function initialImports(name) {
   assert.ok(bytes, `Missing initial script ${name}`)
   initialAssets.add(name)
   const source = new TextDecoder().decode(bytes)
-  for (const [, imported] of source.matchAll(/(?:from\s*|import\s*)["'](\.[^"']+\.js)["']/g))
+  for (const [, imported] of source.matchAll(
+    /(?:from\s*|import\s*)["'](\.[^"']+\.js)["']/g
+  ))
     initialImports(posix.normalize(posix.join(posix.dirname(name), imported)))
 }
-for (const [, source] of html.matchAll(/<script[^>]+src="([^"]+\.js)"/g)) initialImports(source.replace(/^\.\//, ""))
-const initialJs = [...initialAssets].reduce((sum, name) => sum + gzipSync(files.get(name)).byteLength, 0)
+for (const [, source] of html.matchAll(/<script[^>]+src="([^"]+\.js)"/g))
+  initialImports(source.replace(/^\.\//, "").replace(/^\//, ""))
+const initialJs = [...initialAssets].reduce(
+  (sum, name) => sum + gzipSync(files.get(name)).byteLength,
+  0
+)
 assert.ok(initialJs < 250 * 1024, "Initial JS exceeds 250 KB gzip budget")
 const unpacked = unzipSync(zip)
 assert.equal(Object.keys(unpacked).length, files.size)
@@ -93,6 +101,7 @@ await writeFile(
   `${sha256}  ${filename}\n`
 )
 const report = {
+  buildId: build.buildId,
   version: pkg.version,
   files: files.size,
   archiveBytes: zip.byteLength,
@@ -104,5 +113,14 @@ const report = {
 await writeFile(
   resolve(output, "release-report.json"),
   JSON.stringify(report, null, 2)
+)
+await mkdir(resolve(root, "docs/releases"), { recursive: true })
+await writeFile(
+  resolve(root, `docs/releases/${pkg.version}.json`),
+  JSON.stringify(report, null, 2) + "\n"
+)
+await writeFile(
+  resolve(root, `docs/releases/${pkg.version}.md`),
+  `# TabNest ${pkg.version} 发布数据\n\n由 tools/release.mjs 从同一次发布报告自动生成。\n\n| 项目 | 实际值 |\n| --- | --- |\n| 扩展 ZIP | ${filename} |\n| ZIP 字节数 | ${report.archiveBytes} |\n| 首屏 JavaScript gzip 字节数 | ${report.initialJsGzipBytes} |\n| SHA-256 | \x60${sha256}\x60 |\n`
 )
 console.log(JSON.stringify(report, null, 2))

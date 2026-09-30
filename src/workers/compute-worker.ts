@@ -1,54 +1,54 @@
-import {
-  heatCanvas,
-  heatTopologySnapshot,
-  hydrateHeatTopologies,
-} from "../lib/heat-layout"
-import {
-  createSearchIndex,
-  createFolderSearchIndex,
-  searchBookmarks,
-} from "../lib/search"
-let searchIndex: ReturnType<typeof createSearchIndex> = []
-let folderIndex: ReturnType<typeof createSearchIndex> = []
+import { COMPUTE_VERSION } from "../lib/compute-client"
+import type { HeatInput } from "../lib/heat-layout"
+import { calculateHeat } from "../lib/heat-layout"
+import { solveRegionTasks } from "../lib/heat-session"
+const cancelled = new Set<number>()
+import type * as SearchModule from "../lib/search"
+let searchModule: typeof SearchModule | undefined
+let searchIndex: ReturnType<typeof SearchModule.createSearchIndex> = []
+let folderIndex: ReturnType<typeof SearchModule.createSearchIndex> = []
 let searchRevision = -1
 self.onmessage = async (event) => {
-  const { id, task, payload } = event.data
+  const { version, id, task, payload, session, dataRevision, requestRevision } = event.data
+  if (task === "cancel") { cancelled.add(id); if (cancelled.size > 128) cancelled.delete(cancelled.values().next().value!); return }
+  const respond = (result: object) => {
+    if (!cancelled.delete(id)) self.postMessage({ version: COMPUTE_VERSION, id, session, dataRevision, requestRevision, ...result })
+  }
   try {
-    if (task === "heat") {
-      hydrateHeatTopologies(payload.topologies)
-      const result = heatCanvas(
-        payload.items,
-        payload.clicks,
-        payload.width,
-        payload.available,
-        payload.gap,
-        payload.scale
-      )
+    if (version !== COMPUTE_VERSION) throw new Error("计算版本不兼容")
+    if (["heat-regions", "heat-init", "heat-delta", "heat-viewport"].includes(task)) {
+      const results = []
+      for (const regionTask of payload.tasks) {
+        await new Promise(resolve => setTimeout(resolve, 0))
+        if (cancelled.delete(id)) return
+        results.push(...solveRegionTasks([regionTask], payload.gap, payload.scale))
+      }
+      respond({ value: results })
+    } else if (task === "heat") {
       self.postMessage({
+        version: COMPUTE_VERSION,
         id,
-        value: {
-          height: result.height,
-          boxes: result.boxes.map(({ item, ...box }) => ({
-            ...box,
-            id: item.id,
-          })),
-          topologies: heatTopologySnapshot(),
-        },
+        value: calculateHeat(payload as HeatInput),
       })
     } else if (task === "search-index") {
-      searchIndex = createSearchIndex(payload.items, payload.folders)
-      folderIndex = createFolderSearchIndex(payload.folders)
+      searchModule ??= await import("../lib/search")
+      searchIndex = searchModule.createSearchIndex(payload.items, payload.folders)
+      folderIndex = searchModule.createFolderSearchIndex(payload.folders)
       searchRevision = payload.revision
-      self.postMessage({ id, value: searchRevision })
+      self.postMessage({ version: COMPUTE_VERSION, id, value: searchRevision })
     } else if (task === "search") {
       self.postMessage({
+        version: COMPUTE_VERSION,
         id,
         value: {
           revision: searchRevision,
-          ids: searchBookmarks(searchIndex, payload.query).map(
-            (item) => item.id
-          ),
-          folderIds: searchBookmarks(folderIndex, payload.query).map(
+          ids: searchModule!.searchBookmarks(
+            searchIndex,
+            payload.query,
+            payload.clicks,
+            payload.recent
+          ).map((item) => item.id),
+          folderIds: searchModule!.searchBookmarks(folderIndex, payload.query).map(
             (item) => item.id
           ),
         },
@@ -56,6 +56,7 @@ self.onmessage = async (event) => {
     }
   } catch (error) {
     self.postMessage({
+      version: COMPUTE_VERSION,
       id,
       error: error instanceof Error ? error.message : "计算失败",
     })

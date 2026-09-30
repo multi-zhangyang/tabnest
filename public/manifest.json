@@ -1,10 +1,14 @@
 {
   "manifest_version": 3,
   "name": "TabNest — 书签导航新标签页",
-  "version": "2.6.1",
+  "version": "2.7.1",
   "description": "书签拼图随使用频率生长，文件夹保持井然有序。支持中文搜索、批量整理、本地备份与亮暗主题。",
   "chrome_url_overrides": {
     "newtab": "index.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
   },
   "permissions": [
     "bookmarks",

@@ -8,10 +8,10 @@ import { ErrorBoundary } from "@/components/error-boundary"
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ThemeProvider defaultTheme="dark">
-      <ErrorBoundary>
+    <ErrorBoundary>
+      <ThemeProvider defaultTheme="dark">
         <App />
-      </ErrorBoundary>
-    </ThemeProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   </StrictMode>
 )

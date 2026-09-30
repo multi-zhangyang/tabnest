@@ -1,92 +1,72 @@
-import { useEffect, useMemo, useState } from "react"
-import {
-  heatCanvas,
-  heatTopologySnapshot,
-  hydrateHeatTopologies,
-  persistHeatTopologies,
-} from "@/lib/heat-layout"
-import type { HeatBox } from "@/lib/heat-layout"
+import { useEffect, useLayoutEffect, useState, useRef, useMemo } from "react"
+import { savedHeatSnapshot, persistHeatTopologies, clearHeatWorkingCaches } from "@/lib/heat-layout"
+import type { HeatLayout } from "@/lib/heat-layout"
+import { createHeatSession } from "@/lib/heat-session"
+import type { RegionResult } from "@/lib/heat-session"
 import type { BookmarkItem } from "@/lib/types"
-import { compute } from "@/lib/compute-client"
-
+import { compute, onComputeDispose } from "@/lib/compute-client"
+import { changedClickUrls } from "@/lib/preferences"
+onComputeDispose(clearHeatWorkingCaches)
+let serial = 0
 export function useHeatCanvas(
-  items: BookmarkItem[],
-  clicks: Record<string, number>,
-  width: number,
-  available: number,
-  gap: number,
-  scale: number,
-  frozen: boolean
+  items: BookmarkItem[], clicks: Record<string, number>, width: number,
+  available: number, gap: number, scale: number, frozen: boolean,
+  visible: { top: number; bottom: number }, focusedId: string
 ) {
-  const [settled, setSettled] = useState(clicks)
+  const [revision, setRevision] = useState(0)
+  const request = useRef(0)
+  const identity = useRef({ session: 0 })
+  const [layout, setLayout] = useState<HeatLayout>({ boxes: [], height: available, affectedIds: [] })
+  const session = useMemo(() => {
+    const input = { items, clicks: {}, width, available, gap, scale }
+    return { id: ++serial, value: createHeatSession({ ...input, clicks, previous: savedHeatSnapshot(input) }) }
+    // Clicks are applied as deltas below, without rebuilding collection indexes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, width, available, gap, scale])
   useEffect(() => {
-    if (frozen) return
-    const timer = setTimeout(() => setSettled(clicks), 48)
-    return () => clearTimeout(timer)
-  }, [clicks, frozen])
-  const large = items.length >= 1000
-  const sync = useMemo(
-    () =>
-      large || frozen
-        ? null
-        : heatCanvas(items, settled, width, available, gap, scale),
-    [items, settled, width, available, gap, scale, large, frozen]
-  )
-  const [asyncLayout, setAsyncLayout] = useState<{
-    boxes: HeatBox[]
-    height: number
-  }>({ boxes: [], height: available })
-  const nextLayout = sync || asyncLayout
-  const [displayed, setDisplayed] = useState(nextLayout)
-  if (!frozen && displayed !== nextLayout) setDisplayed(nextLayout)
-  useEffect(() => {
-    if (!large || !width || frozen) return
-    let current = true
-    const input = {
-      items,
-      clicks: settled,
-      width,
-      available,
-      gap,
-      scale,
-      topologies: heatTopologySnapshot(),
-    }
-    void compute<{
-      height: number
-      boxes: {
-        id: string
-        x: number
-        y: number
-        width: number
-        height: number
-      }[]
-      topologies: unknown
-    }>("heat", input)
-      .then((result) => {
-        if (!current) return
-        const byId = new Map(items.map((item) => [item.id, item]))
-        setAsyncLayout({
-          height: result.height,
-          boxes: result.boxes.map(({ id, ...box }) => ({
-            ...box,
-            item: byId.get(id)!,
-          })),
+    const resume = () => { if (!document.hidden) setRevision(n => n + 1) }
+    document.addEventListener("visibilitychange", resume)
+    return () => { document.removeEventListener("visibilitychange", resume) }
+  }, [])
+  useLayoutEffect(() => {
+    const value = session.value
+    if (!value) return
+    const id = ++request.current
+    value.update(clicks, changedClickUrls(clicks))
+    if (frozen && identity.current.session !== 0) return
+    identity.current.session = session.id
+    const top = items.length <= 250 ? -Infinity : visible.top
+    const bottom = items.length <= 250 ? Infinity : visible.bottom
+    value.solve(value.visibleIndices(top, bottom, focusedId))
+    const publish = () => setLayout({
+      height: value.snapshot.height, snapshot: value.snapshot, affectedIds: [],
+      boxes: value.visible(top, bottom, focusedId),
+    })
+    publish()
+    let timer: ReturnType<typeof setTimeout>
+    const abort = new AbortController()
+    const run = async () => {
+      if (abort.signal.aborted || document.hidden || !value.pending.size) return
+      const tasks = value.tasks([...value.pending].slice(0, 4))
+      try {
+        const task = tasks.some(t => t.initial) ? "heat-init" : "heat-delta"
+        const results = await compute<RegionResult[]>(task, { tasks, gap, scale }, {
+          signal: abort.signal, session: session.id, dataRevision: session.id, requestRevision: id,
         })
-        hydrateHeatTopologies(result.topologies)
-        persistHeatTopologies()
-      })
-      .catch(() => {
-        if (current)
-          setAsyncLayout(
-            heatCanvas(items, settled, width, available, gap, scale)
-          )
-      })
-    return () => {
-      current = false
+        if (abort.signal.aborted || request.current !== id) return
+        value.accept(results)
+      } catch {
+        if (abort.signal.aborted || request.current !== id) return
+        value.solve(tasks.map(t => t.index))
+      }
+      if (!value.pending.size) {
+        publish()
+        timer = setTimeout(() => { void persistHeatTopologies() }, 280)
+      } else timer = setTimeout(() => { void run() }, 16)
     }
-  }, [items, settled, width, available, gap, scale, large, frozen])
-  useEffect(() => {
-    if (sync) persistHeatTopologies()
-  }, [sync])
-  return displayed
+    if (!value.pending.size) timer = setTimeout(() => { void persistHeatTopologies() }, 280)
+    else timer = setTimeout(() => { void run() }, 50)
+    return () => { clearTimeout(timer); abort.abort() }
+  }, [session, items.length, clicks, frozen, visible.top, visible.bottom, focusedId, gap, scale, revision])
+  return { ...layout, ready: !!session.value && layout.snapshot?.key === session.value.snapshot.key, getBox: (id: string) => session.value?.box(id) }
 }

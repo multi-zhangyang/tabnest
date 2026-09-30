@@ -1,7 +1,7 @@
 {
   "name": "tabnest",
   "private": true,
-  "version": "2.6.1",
+  "version": "2.7.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,15 +15,27 @@
     "test:extension": "node tools/extension-check.mjs",
     "test:scroll": "node tools/scroll-check.mjs",
     "test:ui-details": "node tools/ui-detail-check.mjs",
-    "check": "npm run lint && npm test && npm run build && npm run test:browser && npm run test:extension && npm run test:startup && npm run test:scroll && npm run test:ui-details && npm run test:product && npm run test:upgrade && npm run test:virtual-focus && npm run test:performance",
-    "release": "npm run check && node tools/release.mjs",
+    "test:surfaces": "node tools/surface-check.mjs",
+    "test:mosaic": "node tools/mosaic-layout-check.mjs",
+    "test:heat-growth": "node tools/heat-growth-check.mjs",
+    "test:navigation": "node tools/navigation-check.mjs",
+    "test:memory": "node tools/memory-check.mjs",
+    "test:view-switch": "node tools/view-switch-check.mjs",
+    "check": "npm run lint && npm test && npm run build && npm run test:browser && npm run test:extension && npm run test:startup && npm run test:scroll && npm run test:ui-details && npm run test:surfaces && npm run test:product && npm run test:upgrade && npm run test:mosaic && npm run test:heat-growth && npm run test:navigation && npm run test:memory && npm run test:view-switch && npm run test:virtual-focus && npm run test:faults && npm run test:performance",
+    "release": "npm run build && node tools/candidate.mjs && node tools/check-suite.mjs && node tools/verification-release.mjs && node tools/acceptance-report.mjs && node tools/source-release.mjs",
     "test:product": "node tools/product-check.mjs",
     "test:performance": "node tools/performance-check.mjs",
     "test:upgrade": "node tools/upgrade-ui-check.mjs",
     "test:compatibility": "node tools/compatibility-check.mjs",
     "test:startup": "node tools/startup-check.mjs",
     "docs:screenshots": "node tools/docs-screenshots.mjs",
-    "test:virtual-focus": "node tools/virtual-focus-check.mjs"
+    "test:virtual-focus": "node tools/virtual-focus-check.mjs",
+    "test:faults": "node tools/fault-check.mjs",
+    "test:package": "node tools/package-check.mjs",
+    "test:quality": "node tools/quality-browser-check.mjs",
+    "test:memory-native": "node tools/memory-native-check.mjs",
+    "test:soak": "node tools/soak-check.mjs",
+    "check:candidate": "node tools/check-suite.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
@@ -65,5 +77,6 @@
   },
   "engines": {
     "node": ">=22.12.0"
-  }
+  },
+  "license": "MIT"
 }

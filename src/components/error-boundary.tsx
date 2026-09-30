@@ -1,6 +1,7 @@
 import { Component } from "react"
 import type { ReactNode } from "react"
 import { Button } from "@/components/ui/button"
+import { FieldError } from "@/components/ui/field"
 import {
   Empty,
   EmptyContent,
@@ -10,11 +11,20 @@ import {
 
 export class ErrorBoundary extends Component<
   { children: ReactNode },
-  { failed: boolean }
+  { failed: boolean; exporting: boolean; error: string }
 > {
-  state = { failed: false }
+  state = { failed: false, exporting: false, error: "" }
   static getDerivedStateFromError() {
     return { failed: true }
+  }
+  componentDidCatch() { document.documentElement.dataset.startup = "ready" }
+  export = async () => {
+    this.setState({ exporting: true, error: "" })
+    try {
+      const { createRecoveryFile, downloadRecoveryFile } = await import("@/lib/recovery-file")
+      downloadRecoveryFile(await createRecoveryFile())
+    } catch { this.setState({ error: "恢复文件导出失败" }) }
+    finally { this.setState({ exporting: false }) }
   }
   render() {
     if (this.state.failed)
@@ -25,6 +35,8 @@ export class ErrorBoundary extends Component<
           </EmptyHeader>
           <EmptyContent>
             <Button onClick={() => window.location.reload()}>重新加载</Button>
+            <Button variant="outline" disabled={this.state.exporting} onClick={() => void this.export()}>导出恢复文件</Button>
+            {this.state.error && <FieldError role="alert">{this.state.error}</FieldError>}
           </EmptyContent>
         </Empty>
       )

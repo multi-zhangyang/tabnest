@@ -6,6 +6,7 @@ import type { AppSettings, BookmarkItem } from "@/lib/types"
 import { hydrateHeatTopologies } from "@/lib/heat-layout"
 import { useVisibleCanvas } from "@/hooks/use-visible-canvas"
 import { useHeatCanvas } from "@/hooks/use-heat-canvas"
+import { useHeatAnimation } from "@/hooks/use-heat-animation"
 import { useBookmarkManagement } from "./bookmark-management"
 hydrateHeatTopologies()
 
@@ -24,21 +25,6 @@ export const HeatMap = memo(function HeatMap({
   const management = useBookmarkManagement()
   const [overlayOpen, setOverlayOpen] = useState(false)
   const frozen = overlayOpen || !!management?.active || !!management?.drop
-  const pausedGeometry = useRef<Animation[]>([])
-  useLayoutEffect(() => {
-    if (frozen) {
-      pausedGeometry.current = [
-        ...(container.current?.querySelectorAll<HTMLElement>(".heat-cell") ||
-          []),
-      ]
-        .flatMap((cell) => cell.getAnimations())
-        .filter((animation) => animation.playState === "running")
-      pausedGeometry.current.forEach((animation) => animation.pause())
-    } else {
-      pausedGeometry.current.forEach((animation) => animation.play())
-      pausedGeometry.current = []
-    }
-  }, [frozen])
   useEffect(() => {
     let frame = 0
     const update = () => {
@@ -75,7 +61,7 @@ export const HeatMap = memo(function HeatMap({
       element.focus({ preventScroll: true })
       pendingFocus.current = ""
     }
-  }, [focusedId, visible])
+  })
   const [size, setSize] = useState({ width: 0, available: 600 })
   useLayoutEffect(() => {
     const element = container.current
@@ -94,6 +80,7 @@ export const HeatMap = memo(function HeatMap({
       })
     }
     const observer = new ResizeObserver(update)
+    update()
     observer.observe(element)
     window.addEventListener("resize", update)
     return () => {
@@ -103,15 +90,18 @@ export const HeatMap = memo(function HeatMap({
   }, [])
   const gap =
     settings.density === "compact" ? 5 : settings.density === "loose" ? 12 : 8
-  const { height, boxes } = useHeatCanvas(
+  const { height, boxes, snapshot, ready, getBox } = useHeatCanvas(
     items,
     clicks,
     size.width,
     size.available,
     gap,
     settings.cardScale,
-    frozen
+    frozen,
+    visible,
+    focusedId
   )
+  useHeatAnimation(container, boxes, snapshot, frozen, gap, settings.cardScale)
   return (
     <div className="heat-view">
       <div
@@ -119,6 +109,7 @@ export const HeatMap = memo(function HeatMap({
         className="heat-canvas"
         style={{ height }}
         data-testid="heat-canvas"
+        data-layout-ready={ready}
         onFocusCapture={(event) =>
           setFocusedId(
             (event.target as HTMLElement).closest<HTMLElement>("[data-item-id]")
@@ -137,8 +128,9 @@ export const HeatMap = memo(function HeatMap({
           const id = (event.target as HTMLElement).closest<HTMLElement>(
             "[data-item-id]"
           )?.dataset.itemId
-          const index = boxes.findIndex((box) => box.item.id === id)
-          const next = boxes[index + (event.shiftKey ? -1 : 1)]
+          const index = items.findIndex((item) => item.id === id)
+          const nextItem = items[index + (event.shiftKey ? -1 : 1)]
+          const next = nextItem && getBox(nextItem.id)
           if (!next) return
           event.preventDefault()
           pendingFocus.current = next.item.id
@@ -170,7 +162,7 @@ export const HeatMap = memo(function HeatMap({
               Math.min(30, Math.min(box.width, box.height) * 0.12)
             )
             const icon = Math.max(
-              4,
+              24,
               Math.min(
                 84,
                 unit * 0.27 * settings.cardScale,

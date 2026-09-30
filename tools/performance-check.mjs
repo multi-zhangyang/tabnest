@@ -8,6 +8,7 @@ import {
   chromePath,
 } from "./runtime.mjs"
 import { showSearchResults, clearSearch } from "./search-helpers.mjs"
+import {installCanvasClock,canvasFrameTime} from './performance-clock.mjs'
 
 const preview = await servePreview(),
   browser = await launchBrowser()
@@ -22,20 +23,30 @@ const scenarios = [
   { count: 5000, folders: 1000 },
   { count: 20000, folders: 1000 },
   { count: 20000, folders: 2000 },
+  { count: 500, folders: 50, historicalHeat: true },
+  { count: 5000, folders: 1000, historicalHeat: true },
+  { count: 20000, folders: 2000, historicalHeat: true },
 ]
+const runs = Number(process.env.PERF_SAMPLES || 20)
+const only = process.env.PERF_COUNT && Number(process.env.PERF_COUNT)
+if (only) scenarios.splice(0, scenarios.length, ...scenarios.filter(s => s.count === only))
+if(process.env.PERF_HEAT)scenarios.splice(0,scenarios.length,...scenarios.filter(s=>!!s.historicalHeat===(process.env.PERF_HEAT==='historical')))
 let currentPage, currentSample, stage
 try {
   for (const scenario of scenarios) {
     const samples = []
-    for (let run = 0; run < 5; run++) {
+    for (let run = 0; run < runs; run++) {
       const page = await browser.newPage()
+      await installCanvasClock(page)
+      const cpuRate = Number(process.env.PERF_CPU || 1)
+      if (cpuRate > 1) { const cdp = await page.createCDPSession(); await cdp.send("Emulation.setCPUThrottlingRate", { rate: cpuRate }) }
       currentPage = page
       currentSample = { ...scenario, run: run + 1 }
       stage = "startup"
       page.setDefaultTimeout(15000)
       page.on("pageerror", (e) => errors.push(e.message))
       await openPreview(page, preview.url)
-      await page.evaluate(({ count, folders: folderCount }) => {
+      await page.evaluate(({ count, folders: folderCount, historicalHeat }) => {
         localStorage.clear()
         const folders = [
           {
@@ -81,27 +92,44 @@ try {
           )
         save("tabnest:demo-bookmarks:v2", { folders, groups })
         save("tabnest:settings", { layout: "heat", iconMode: "favicon" })
-        save("tabnest:clicks", {})
+        save(
+          "tabnest:clicks",
+          historicalHeat
+            ? Object.fromEntries(
+                Array.from({ length: count }, (_, i) => [
+                  `https://site${i}.test/`,
+                  i % 5 === 0 ? 0 : ((i * 2654435761) >>> 0) % 4096,
+                ])
+              )
+            : {}
+        )
         localStorage.setItem("theme", "light")
       }, scenario)
       const start = performance.now()
       await page.reload({ waitUntil: "domcontentloaded" })
       await page.waitForSelector(".heat-card")
+      await page.waitForFunction(
+        () =>
+          Number(getComputedStyle(document.getElementById("root")).opacity) ===
+          1
+      )
       await page.evaluate(
         () =>
           new Promise((r) =>
             requestAnimationFrame(() => requestAnimationFrame(r))
           )
       )
-      const firstCanvasMs = Math.round(performance.now() - start)
+      const firstCanvasMs = await canvasFrameTime(page)
+      const automationStartupMs=Math.round(performance.now()-start)
       const heatDOM = await page.$$eval(".heat-card", (els) => els.length)
       stage = "heat-update"
-      const heatUpdateMs = await page.evaluate(async () => {
+      const clickTiming = await page.evaluate(async () => {
         window.open = () => null
         const card = document.querySelector(".heat-card"),
           id = card.dataset.bookmarkId,
           count = Number(card.dataset.clicks),
-          start = performance.now()
+          start = performance.now(),
+          initial = card.parentElement.getBoundingClientRect()
         card.dispatchEvent(
           new MouseEvent("click", {
             bubbles: true,
@@ -118,8 +146,28 @@ try {
           if (performance.now() - start > 5000) throw Error("heat timeout")
           await new Promise((r) => requestAnimationFrame(r))
         }
-        return Math.round(performance.now() - start)
+        const heatUpdateMs = Math.round(performance.now() - start)
+        while (true) {
+          const next = document
+            .querySelector(`[data-bookmark-id="${id}"]`)
+            ?.parentElement.getBoundingClientRect()
+          if (
+            next &&
+            Math.abs(
+              next.width * next.height - initial.width * initial.height
+            ) > 0.1
+          )
+            break
+          if (performance.now() - start > 5000)
+            throw Error("first area change timeout")
+          await new Promise((r) => requestAnimationFrame(r))
+        }
+        return {
+          heatUpdateMs,
+          firstAreaChangeMs: Math.round(performance.now() - start),
+        }
       })
+      const { heatUpdateMs, firstAreaChangeMs } = clickTiming
       await page.locator('[aria-label="打开搜索"]').click()
       stage = "search"
       await page.waitForSelector('[aria-label="搜索书签"]')
@@ -149,13 +197,24 @@ try {
         ".search-results .bookmark-card",
         (els) => els.length
       )
-      const target = await page.evaluate(() => {
+      const searchOrder = await page.evaluate(() => {
+        return JSON.parse(localStorage.getItem("tabnest:clicks")).data
+      })
+      const orderedIds = Array.from({ length: scenario.count }, (_, i) => i)
+        .sort(
+          (a, b) =>
+            (searchOrder[`https://site${b}.test/`] || 0) -
+              (searchOrder[`https://site${a}.test/`] || 0) || a - b
+        )
+        .map((i) => `b${i}`)
+      const focusedId = await page.evaluate(() => {
         const last = [
           ...document.querySelectorAll(".search-results .bookmark-card"),
         ].at(-1)
         last.focus({ preventScroll: true })
-        return `b${Number(last.dataset.bookmarkId.slice(1)) + 1}`
+        return last.dataset.bookmarkId
       })
+      const target = orderedIds[orderedIds.indexOf(focusedId) + 1]
       await page.keyboard.press("Tab")
       stage = "search-tab"
       await page.waitForFunction(
@@ -166,17 +225,17 @@ try {
       await page.keyboard.press("End")
       stage = "search-end"
       await page.waitForFunction(
-        (count) => {
+        (id) => {
           const el = document.activeElement,
             b = el?.getBoundingClientRect()
           return (
-            el?.dataset.bookmarkId === `b${count - 1}` &&
+            el?.dataset.bookmarkId === id &&
             b.top >= 75 &&
             b.bottom <= innerHeight + 1
           )
         },
         {},
-        scenario.count
+        orderedIds.at(-1)
       )
       await clearSearch(page)
       stage = "folders"
@@ -216,8 +275,10 @@ try {
       samples.push({
         run: run + 1,
         firstCanvasMs,
+        automationStartupMs,
         searchMs,
         heatUpdateMs,
+        firstAreaChangeMs,
         zonesMs,
         heatDOM,
         searchDOM,
@@ -229,10 +290,13 @@ try {
       await page.close()
     }
     const p95 = Object.fromEntries(
-      ["firstCanvasMs", "searchMs", "heatUpdateMs", "zonesMs"].map((key) => [
-        key,
-        percentile(samples.map((s) => s[key])),
-      ])
+      [
+        "firstCanvasMs",
+        "searchMs",
+        "heatUpdateMs",
+        "firstAreaChangeMs",
+        "zonesMs",
+      ].map((key) => [key, percentile(samples.map((s) => s[key]))])
     )
     results.push({ ...scenario, samples, p95 })
   }
@@ -246,14 +310,16 @@ try {
       browser: await browser.version(),
       executable: chromePath(),
       viewport: "1440×900",
-      gpu: "disabled by test harness",
+      gpu: process.env.TEST_GPU === "enabled" ? "enabled" : "disabled by test harness",
+      cpuRate: Number(process.env.PERF_CPU || 1),
     },
     method:
-      "Five fresh pages per scenario; uncached layout; startup until two rendered frames; first query after search opens; actual storage-backed click update; no CPU/network throttling.",
+      `${runs} fresh pages per scenario; uncached layout; zero heat and deterministic mixed historical heat (80% nonzero, 0–4095 clicks); startup measured in the browser from navigation start through two frames after a valid visible canvas, automation wall time also recorded; first query after search opens; actual storage-backed click update; CPU rate ${Number(process.env.PERF_CPU || 1)}; no network throttling.`,
     targets: {
-      firstCanvasMs: 1500,
-      searchMs: 100,
-      heatUpdateMs: 100,
+      firstCanvasMs: Number(process.env.PERF_CPU || 1)===4 ? 3000 : 1500,
+      searchMs: Number(process.env.PERF_CPU || 1)===4 ? 200 : 100,
+      heatUpdateMs: Number(process.env.PERF_CPU || 1)===4 ? 200 : 100,
+      firstAreaChangeMs: Number(process.env.PERF_CPU || 1)===4 ? 300 : 150,
       mountedBookmarks: 250,
     },
     results,
@@ -266,17 +332,21 @@ try {
   )
   await writeFile(
     "artifacts/performance-report.md",
-    `# TabNest performance\n\n${report.device.os} · ${report.device.cpu} · ${report.device.browser}\n\n${report.method}\n\n| Bookmarks | Folders | Canvas P95 | Search P95 | Click P95 |\n|---|---|---|---|---|\n${results.map((r) => `| ${r.count} | ${r.folders} | ${r.p95.firstCanvasMs} ms | ${r.p95.searchMs} ms | ${r.p95.heatUpdateMs} ms |`).join("\n")}\n`
+    `# TabNest performance\n\n${report.device.os} · ${report.device.cpu} · ${report.device.browser}\n\n${report.method}\n\n| Heat | Bookmarks | Folders | Canvas P95 | Search P95 | Click P95 | First area P95 |\n|---|---|---|---|---|---|---|\n${results.map((r) => `| ${r.historicalHeat ? "historical" : "zero"} | ${r.count} | ${r.folders} | ${r.p95.firstCanvasMs} ms | ${r.p95.searchMs} ms | ${r.p95.heatUpdateMs} ms | ${r.p95.firstAreaChangeMs} ms |`).join("\n")}\n`
   )
   assert.deepEqual(errors, [])
-  for (const result of results.filter((r) => r.count === 5000)) {
+  for (const result of results) {
     assert.ok(
-      result.p95.firstCanvasMs <= 1500,
+      result.p95.firstCanvasMs <= report.targets.firstCanvasMs,
       `startup P95 ${result.p95.firstCanvasMs}`
     )
-    assert.ok(result.p95.searchMs <= 100, `search P95 ${result.p95.searchMs}`)
     assert.ok(
-      result.p95.heatUpdateMs <= 100,
+      result.p95.firstAreaChangeMs <= report.targets.firstAreaChangeMs,
+      `first area change P95 ${result.p95.firstAreaChangeMs}`
+    )
+    assert.ok(result.p95.searchMs <= report.targets.searchMs, `search P95 ${result.p95.searchMs}`)
+    assert.ok(
+      result.p95.heatUpdateMs <= report.targets.heatUpdateMs,
       `click P95 ${result.p95.heatUpdateMs}`
     )
   }

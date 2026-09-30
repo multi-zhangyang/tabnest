@@ -1,6 +1,8 @@
 import type { BookmarkFolder, BookmarkItem } from "./types"
 import { pinyin } from "pinyin-pro"
 import { normalizeSearch as normalize, queryTokens } from "./search-tokens"
+import type { RecentOpen } from "./recent"
+import { safeUrl } from "./urls"
 export { queryTokens } from "./search-tokens"
 
 const transliteration = (text: string) => {
@@ -21,6 +23,7 @@ export function createSearchIndex(
   )
   return items.map((item) => ({
     item,
+    canonicalUrl: safeUrl(item.url) || "",
     title: normalize(item.title),
     latin: `${transliteration(item.title)} ${pathLatin.get(item.parentId || "") || ""}`,
     url: normalize(item.url),
@@ -42,11 +45,14 @@ export function createFolderSearchIndex(folders: BookmarkFolder[]) {
 
 export function searchBookmarks(
   index: ReturnType<typeof createSearchIndex>,
-  query: string
+  query: string,
+  clicks: Record<string, number> = {},
+  recent: RecentOpen[] = []
 ) {
   const tokens = queryTokens(query)
   if (!tokens.length) return index.map((entry) => entry.item)
   const phrase = tokens.join(" ")
+  const lastOpened = new Map(recent.map((row) => [row.url, row.openedAt]))
   return index
     .flatMap((entry) => {
       let score =
@@ -58,8 +64,22 @@ export function searchBookmarks(
         else if (entry.latin.includes(token)) score += 4
         else return []
       }
-      return [{ item: entry.item, score }]
+      return [
+        {
+          item: entry.item,
+          score,
+          exact: entry.title === phrase,
+          clicks: clicks[entry.item.url] || 0,
+          opened: lastOpened.get(entry.canonicalUrl) || 0,
+        },
+      ]
     })
-    .sort((a, b) => b.score - a.score)
+    .sort(
+      (a, b) =>
+        Number(b.exact) - Number(a.exact) ||
+        b.score - a.score ||
+        b.clicks - a.clicks ||
+        b.opened - a.opened
+    )
     .map((entry) => entry.item)
 }

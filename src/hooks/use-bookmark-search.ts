@@ -6,12 +6,17 @@ import { searchLibrary, warmSearch } from "@/lib/search-service"
 import { isComposing, openTarget } from "@/lib/navigation"
 import type { OpenTarget } from "@/lib/navigation"
 import type { BookmarkFolder, BookmarkItem, SortKey } from "@/lib/types"
+import { recentBookmarks } from "@/lib/recent"
+import type { RecentOpen } from "@/lib/recent"
+import { retainCompute } from "@/lib/compute-client"
 
 export function useBookmarkSearch(
   items: BookmarkItem[],
   folders: BookmarkFolder[],
   sort: SortKey,
-  onOpen: (item: BookmarkItem, target?: OpenTarget) => void
+  onOpen: (item: BookmarkItem, target?: OpenTarget) => void,
+  clicks: Record<string, number> = {},
+  recent: RecentOpen[] = []
 ) {
   const [query, setQuery] = useState("")
   const [pageQuery, setPageQuery] = useState("")
@@ -24,20 +29,21 @@ export function useBookmarkSearch(
   const [duplicatesOnly, setDuplicatesOnly] = useState(false)
   const [selection, setSelection] = useState(-1)
   const inputRef = useRef<HTMLInputElement>(null)
+  const queryActive = !!query.trim()
+  const rankedClicks = queryActive ? clicks : undefined
+  const rankedRecent = queryActive ? recent : undefined
   const previousScroll = useRef(0)
+  useEffect(() => { if (paletteOpen) return retainCompute() }, [paletteOpen])
   useEffect(() => {
-    if (!items.length && !folders.length) return
-    const timer = setTimeout(() => {
-      void warmSearch(items, folders).catch(() => {})
-    }, 200)
-    return () => clearTimeout(timer)
-  }, [items, folders])
+    if (!paletteOpen || (!items.length && !folders.length)) return
+    void warmSearch(items, folders).catch(() => {})
+  }, [items, folders, paletteOpen])
   useEffect(() => {
     let current = true
     void Promise.resolve().then(() => {
       if (current) setPending(!!query.trim())
     })
-    void searchLibrary(items, folders, query)
+    void searchLibrary(items, folders, query, rankedClicks, rankedRecent)
       .then((results) => {
         if (current) {
           setMatches(results.items)
@@ -54,7 +60,7 @@ export function useBookmarkSearch(
     return () => {
       current = false
     }
-  }, [items, folders, query])
+  }, [items, folders, query, rankedClicks, rankedRecent])
   const results = useMemo(() => {
     const duplicateIds = duplicatesOnly
       ? new Set(
@@ -63,11 +69,16 @@ export function useBookmarkSearch(
             .flatMap((matches) => matches.map((item) => item.id))
         )
       : null
-    const found = (query.trim() ? matches : items).filter(
-      (item) => !duplicateIds || duplicateIds.has(item.id)
-    )
+    const source = query.trim() ? matches : items
+    const found = duplicateIds
+      ? source.filter((item) => duplicateIds.has(item.id))
+      : source
     return sort === "name" || !query.trim() ? sortItems(found, sort) : found
   }, [items, matches, sort, query, duplicatesOnly])
+  const recentResults = useMemo(
+    () => recentBookmarks(items, recent),
+    [items, recent]
+  )
   const selected = Math.min(selection, results.length - 1)
   useEffect(() => {
     if (paletteOpen || pending || query !== pageQuery) return
@@ -177,6 +188,7 @@ export function useBookmarkSearch(
     active,
     duplicatesOnly,
     results,
+    recentResults,
     folderResults,
     selected,
     inputRef,
@@ -184,6 +196,7 @@ export function useBookmarkSearch(
     onKeyDown,
     change: (value: string) => {
       setQuery(value)
+      setPending(!!value.trim())
       setSelection(-1)
     },
     showDuplicates: () => {

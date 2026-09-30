@@ -37,6 +37,7 @@ try {
     "mixed orientations"
   )
   const canvasHeight = await page.$eval(".heat-canvas", (e) => e.offsetHeight)
+  const canvasWidth = await page.$eval(".heat-canvas", (e) => e.offsetWidth)
   const frames = await page.evaluate(async () => {
     window.open = () => null
     const frames = [],
@@ -62,10 +63,25 @@ try {
     await new Promise((r) => setTimeout(r, 750))
     return frames
   })
+  await writeFile("artifacts/animation-frames.json", JSON.stringify(frames))
   for (const [f, frame] of frames.entries())
     for (let i = 0; i < frame.length; i++) {
       const a = frame[i]
-      assert.ok(a.width >= 47.9 && a.height >= 47.9, `minimum on frame ${f}`)
+      assert.ok(a.width >= 55.9 && a.height >= 55.9, `minimum on frame ${f}`)
+      assert.ok(
+        a.width * a.height <=
+          Math.max(
+            360 ** 2,
+            Math.min(520 ** 2, canvasWidth * canvasHeight * 0.3)
+          ) +
+            1,
+        `max area on frame ${f}`
+      )
+      assert.ok(Math.max(a.width, a.height) <= 700.1, `max edge on frame ${f}`)
+      assert.ok(
+        Math.max(a.width / a.height, a.height / a.width) <= 2.01,
+        `aspect on frame ${f}`
+      )
       for (let j = i + 1; j < frame.length; j++) {
         const b = frame[j]
         assert.ok(
@@ -124,7 +140,12 @@ try {
   assert.deepEqual(await rectangles(), beforeDialog, "modal geometry changed")
   await page.evaluate(() => {
     const key = "tabnest:settings",
-      doc = JSON.parse(localStorage.getItem(key)) || { schemaVersion: 1, revision: 1, updatedAt: new Date().toISOString(), data: {} }
+      doc = JSON.parse(localStorage.getItem(key)) || {
+        schemaVersion: 1,
+        revision: 1,
+        updatedAt: new Date().toISOString(),
+        data: {},
+      }
     doc.data.cardScale = 1.1
     localStorage.setItem(key, JSON.stringify(doc))
     window.dispatchEvent(new CustomEvent("tabnest:storage", { detail: key }))
@@ -173,7 +194,7 @@ try {
       }, theme)
       await delay(280)
       const rs = await rectangles()
-      assert.ok(rs.every((r) => r.width >= 47.9 && r.height >= 47.9))
+      assert.ok(rs.every((r) => r.width >= 55.9 && r.height >= 55.9))
       assert.ok(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= innerWidth
@@ -239,6 +260,43 @@ try {
   await delay(200)
   assert.equal(await page.evaluate(() => scrollY), scroll)
   checks.push({ name: "reduced-motion-and-search-return" })
+  await page.setViewport({ width: 1440, height: 900 })
+  await page.locator('[aria-label="外观与偏好"]').click()
+  await page.waitForSelector(".settings-dialog")
+  await delay(280)
+  const settingsFrames = []
+  for (const name of ["书签", "数据", "外观"]) {
+    const button = await page.evaluateHandle(
+      (name) =>
+        [
+          ...document.querySelectorAll('.settings-navigation [role="tab"]'),
+        ].find((el) => el.textContent.trim() === name),
+      name
+    )
+    await button.asElement().click()
+    for (let frame = 0; frame < 12; frame++) {
+      settingsFrames.push(
+        await page.$eval(".settings-dialog", (el) =>
+          el.getBoundingClientRect().toJSON()
+        )
+      )
+      await delay(20)
+    }
+  }
+  assert.ok(
+    settingsFrames.every(
+      (r) =>
+        Math.abs(r.height - settingsFrames[0].height) < 0.1 &&
+        Math.abs(r.top - settingsFrames[0].top) < 0.1
+    ),
+    "settings categories changed dialog height"
+  )
+  await page.screenshot({ path: "artifacts/settings-final.png" })
+  await page.keyboard.press("Escape")
+  checks.push({
+    name: "settings-fixed-height-category-transitions",
+    frames: settingsFrames.length,
+  })
   assert.deepEqual(errors, [])
   await writeFile(
     "artifacts/upgrade-ui-check.json",

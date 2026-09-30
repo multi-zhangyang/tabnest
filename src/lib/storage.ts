@@ -4,6 +4,7 @@ import { isExtension, withLock } from "./platform"
 export const STORAGE_KEYS = {
   settings: "tabnest:settings",
   clicks: "tabnest:clicks",
+  recent: "tabnest:recent:v1",
   demo: "tabnest:demo-bookmarks:v2",
 } as const
 export const SCHEMA_VERSION = 1

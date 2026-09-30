@@ -1,0 +1,14 @@
+{
+  "version": "2.7.0",
+  "files": 62,
+  "archiveBytes": 682519,
+  "initialJsGzipBytes": 182494,
+  "initialJsAssets": [
+    "theme-init.js",
+    "assets/index-C-akH9it.js",
+    "assets/dialog-BCorgm5D.js",
+    "assets/recent-wWgAddg8.js"
+  ],
+  "sha256": "5a3578bdad2a0bfff44988e753c0afd8807cb06e11d424f06c062a6184003704",
+  "archive": "TabNest-v2.7.0.zip"
+}

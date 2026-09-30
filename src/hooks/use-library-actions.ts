@@ -72,9 +72,17 @@ export function useLibraryActions({
           void record()
         }
       } else {
-        void recordClick(item.url)
-          .catch(() => {})
-          .finally(() => window.location.assign(url))
+        if (!DEMO) {
+          // Let the event worker finish persistence after this document unloads.
+          void chrome.runtime
+            .sendMessage({ type: "record-open", url: item.url })
+            .catch(() => {})
+          window.location.assign(url)
+        } else {
+          void recordClick(item.url)
+            .catch(() => {})
+            .finally(() => window.location.assign(url))
+        }
       }
     },
     [settings.newTab, recordClick]

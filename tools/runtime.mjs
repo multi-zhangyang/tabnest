@@ -28,7 +28,7 @@ export function launchBrowser(options = {}) {
     // Hosted Ubuntu runners restrict the downloaded Chrome's user namespaces.
     // This applies only to disposable Actions test browsers, never local profiles.
     args: [
-      "--disable-gpu",
+      ...(process.env.TEST_GPU === "enabled" ? [] : ["--disable-gpu"]),
       ...(process.platform === "linux" && process.env.GITHUB_ACTIONS === "true"
         ? ["--no-sandbox"]
         : []),

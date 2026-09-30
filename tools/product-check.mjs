@@ -111,7 +111,28 @@ try {
   )
   checks.push("IME-confirmation-does-not-open-and-multi-token-search")
   await page.keyboard.press("Escape")
+  await page.click(`[data-bookmark-id="${fixture.items[0].id}"]`,{button:"middle"})
+  await delay(350)
+  await page.bringToFront()
+  const recentDoc=await page.evaluate(async()=> (await chrome.storage.local.get("tabnest:recent:v1"))["tabnest:recent:v1"])
+  assert.equal(recentDoc.data.length,1)
+  assert.equal(recentDoc.data[0].url,fixture.items[0].url)
+  await openSearch(page,"")
+  await page.waitForSelector(`[data-value="bookmark:${fixture.items[0].id}"]`)
+  assert.ok(await page.evaluate(()=>document.querySelector(".search-dialog").textContent.includes("最近打开")))
+  await page.keyboard.press("Escape")
+  await page.locator('[aria-label="外观与偏好"]').click()
+  await click("书签",".settings-dialog [role=tab]")
+  const newOption=await page.evaluateHandle(()=>[...document.querySelectorAll(".settings-dialog button")].find(e=>e.textContent.trim()==="新标签页打开"))
+  const currentOption=await page.evaluateHandle(()=>[...document.querySelectorAll(".settings-dialog button")].find(e=>e.textContent.trim()==="当前标签页打开"))
+  await currentOption.asElement().click()
+  await page.waitForFunction(()=>[...document.querySelectorAll(".settings-dialog button")].find(e=>e.textContent.trim()==="当前标签页打开")?.getAttribute("data-state")==="on")
+  await newOption.asElement().click()
+  await page.waitForFunction(()=>[...document.querySelectorAll(".settings-dialog button")].find(e=>e.textContent.trim()==="新标签页打开")?.getAttribute("data-state")==="on")
+  await page.keyboard.press("Escape")
+  checks.push("recent-open-middle-button-and-mutually-exclusive-open-settings")
   for (const [keys, target] of [
+    [[],"foreground"],
     [["Control"], "background"],
     [["Control", "Shift"], "foreground"],
     [["Shift"], "window"],
@@ -324,7 +345,7 @@ try {
   const backup = JSON.parse(await page.evaluate(() => window.__backup))
   assert.equal(backup.version, 5)
   assert.equal(backup.preferences.theme, "light")
-  assert.equal(backup.preferences.clicks["https://example.com/alpha"], 3)
+  assert.equal(backup.preferences.clicks["https://example.com/alpha"], 5)
   await mkdir("artifacts", { recursive: true })
   await writeFile("artifacts/product-full-backup.json", JSON.stringify(backup))
   await click("导入书签")
@@ -351,7 +372,7 @@ try {
     tree: await chrome.bookmarks.getTree(),
   }))
   assert.notEqual(restored.settings.activeFolderId, fixture.target)
-  assert.equal(restored.clicks["https://example.com/alpha"], 3)
+  assert.equal(restored.clicks["https://example.com/alpha"], 5)
   assert.equal(
     await page.$$eval(".section-bookmarks .bookmark-card", (els) => els.length),
     backup.groups.reduce((sum, group) => sum + group.items.length, 0) * 2

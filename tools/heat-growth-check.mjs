@@ -172,6 +172,51 @@ try {
         "refresh lost grown layout"
       )
   checks.push({ name: "native-growth-refresh-memory" })
+  const history = [2860,60,3,203,473,293,3424,361,841,1371,524,18,2239,0,2036,1497,1598,328,1384,1486,862,674,127,2514]
+  await page.evaluate(async ({ items, history }) => {
+    const stored = (await chrome.storage.local.get("tabnest:clicks"))["tabnest:clicks"]
+    await chrome.storage.local.set({ "tabnest:clicks": {
+      ...stored, revision: stored.revision + 1, updatedAt: new Date().toISOString(),
+      data: Object.fromEntries(items.map((item,i) => [item.url, history[i % 24]])),
+    } })
+    localStorage.removeItem("tabnest:heat-layouts:v8")
+  }, { items, history })
+  await page.reload()
+  await page.waitForFunction(() => document.documentElement.dataset.startup === "ready")
+  await page.waitForFunction(() => localStorage.getItem("tabnest:heat-layouts:v8"))
+  const historicalSnapshot = await page.evaluate(() => JSON.parse(localStorage.getItem("tabnest:heat-layouts:v8")).at(-1)[1])
+  const historicalBefore = await rectangles()
+  await page.evaluate(() => {
+    window.__growthFrames = []
+    const sample = () => {
+      window.__growthFrames.push([...document.querySelectorAll(".heat-cell")].map(e => ({
+        id: e.dataset.itemId, opacity: Number(getComputedStyle(e).opacity), ...e.getBoundingClientRect().toJSON(),
+      })))
+      window.__growthFrame = requestAnimationFrame(sample)
+    }
+    window.__growthFrame = requestAnimationFrame(sample)
+  })
+  let previousLarge = historicalBefore
+  for (const index of [0,6,23]) for (let turn = 1; turn <= 5; turn++) {
+    await click(items[index])
+    const next = await rectangles()
+    const before = previousLarge.find(b => b.id === items[index].id), after = next.find(b => b.id === items[index].id)
+    assert.ok(after.width * after.height > before.width * before.height + 50, `native historical large card stalled ${index}/${turn}`)
+    assert.ok(next.some(box => {
+      const old = previousLarge.find(b => b.id === box.id)
+      return box.id !== items[index].id && box.width * box.height < old.width * old.height - 1
+    }))
+    for (const box of next.filter(b => historicalSnapshot.regions[1].ids.includes(b.id))) {
+      const old = historicalBefore.find(b => b.id === box.id)
+      for (const key of ["x","y","width","height"]) assert.equal(box[key], old[key])
+    }
+    previousLarge = next
+  }
+  const historicalFrames = await page.evaluate(() => { cancelAnimationFrame(window.__growthFrame); return window.__growthFrames })
+  const historicalCanvas = await page.$eval(".heat-canvas", e => e.getBoundingClientRect().toJSON())
+  for (const frame of historicalFrames) assertRenderedHeatFrame(frame, historicalSnapshot, historicalCanvas)
+  assert.equal(await page.$eval(".heat-canvas", e => e.offsetHeight), height)
+  checks.push({ name: "native-large-mixed-history-visible-growth", clicks: 15, frames: historicalFrames.length })
   const oldItems = Array.from({ length: 24 }, (_, i) => ({
     id: `old-micro${i}`,
     url: `https://old-micro.test/${i}`,

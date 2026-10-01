@@ -373,7 +373,8 @@ function constraints(
   width: number,
   height: number,
   gap: number,
-  scale: number
+  scale: number,
+  reference?: Geometry[]
 ) {
   const result: Constraint[] = []
   const subtract = (a: Ref, b: Ref): Linear => ({
@@ -400,12 +401,14 @@ function constraints(
     if ("index" in t) {
       const w = subtract(r, l),
         h = subtract(bottom, top)
+      const box = reference?.[t.index]
+      const aspect = box ? Math.sqrt(box.height / box.width) : 1
       for (const [a, b, limit] of [
         [-1, 0, -56],
         [0, -1, -56],
         [1, 0, heatLimits(width, height, scale).edge],
         [0, 1, heatLimits(width, height, scale).edge],
-        [1, 1, 2 * Math.sqrt(heatLimits(width, height, scale).area)],
+        [aspect, 1 / aspect, 2 * Math.sqrt(heatLimits(width, height, scale).area)],
         [1, -2, 0],
         [-2, 1, 0],
         [1, -3, -112],
@@ -806,6 +809,11 @@ function requestedHeatArea(
   const minimumShare =
     shares[index] <= HEAT_MINIMUM ** 2 + EPS &&
     previousShares[index] <= HEAT_MINIMUM ** 2 + EPS
+  const currentArea = area(r.boxes[index])
+  const clickDelta = Math.max(0, counts[index] - r.counts[index])
+  const visibleIncrement = clickDelta
+    ? (Math.sqrt(currentArea) + Math.min(2, Math.sqrt(clickDelta)) * 0.75) ** 2 - currentArea
+    : 0
   return Math.min(
     maximum,
     Math.max(
@@ -813,7 +821,8 @@ function requestedHeatArea(
         Math.max(
           0,
           shares[index] - previousShares[index],
-          minimumShare ? floorIncrement : 0
+          minimumShare ? floorIncrement : 0,
+          visibleIncrement
         ),
       shares[index]
     )
@@ -872,7 +881,7 @@ function redistribute(
     targets.every(
       (i) =>
         area(first.boxes[i]) - area(r.boxes[i]) >=
-        0.7 * (requestedHeatArea(r, counts, i, scale) - area(r.boxes[i])) - 1
+        Math.max(0, 0.7 * (requestedHeatArea(r, counts, i, scale) - area(r.boxes[i])) - EPS)
     )
   )
     return first
@@ -964,7 +973,7 @@ function fitHeatAreas(
         (a, b) => r.boxes[a].x - r.boxes[b].x || r.boxes[a].y - r.boxes[b].y
       ),
   ]
-  const existingRules = constraints(r.tree, r.width, r.height, gap, scale)
+  const existingRules = constraints(r.tree, r.width, r.height, gap, scale, r.boxes)
   if (!targets.length) {
     bestScore = score(r.boxes)
   }
@@ -1127,7 +1136,7 @@ function fitHeatAreas(
       }
     }
   if (best.boxes !== r.boxes) {
-    const rules = constraints(best.tree, r.width, r.height, gap, scale)
+    const rules = constraints(best.tree, r.width, r.height, gap, scale, best.boxes)
     for (let step = 0; step < (targets.length ? 30 : 0); step++) {
       const gradient = best.cuts.map((_, j) => {
         const probe = [...best.cuts]
@@ -1169,7 +1178,7 @@ function adjustCuts(r: Region, counts: number[], gap: number, scale: number) {
     count > r.counts[i] ? [i] : []
   )
   if (!increased.length) return { ...r, counts }
-  const rules = constraints(r.tree, r.width, r.height, gap, scale)
+  const rules = constraints(r.tree, r.width, r.height, gap, scale, r.boxes)
   const distances = heatNeighbourDistances(r.boxes, increased, gap)
   let cuts = [...r.cuts],
     boxes = r.boxes

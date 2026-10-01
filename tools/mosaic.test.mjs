@@ -20,6 +20,32 @@ const itemsFor = (n, tag) =>
   }))
 const area = (b) => b.width * b.height
 
+test("large cards with mixed historical heat keep visibly growing on individual clicks", () => {
+  const scenarios = [
+    { width: 720, available: 560, target: 0, counts: [2860,60,3,203,473,293,3424,361,841,1371,524,18,2239,0,2036,1497,1598,328,1384,1486,862,674,127,2514] },
+    { width: 1356, available: 360, target: 8, counts: [3350,1383,110,1950,0,455,1659,26,4415,73,273,34,4246,1374,5,5,1469,1801,1032,3,2704,7,4265,4086] },
+    { width: 1814, available: 560, target: 1, counts: [163,4554,2086,1580,2497,3393,2801,1146,286,297,4256,13,169,0,2725,749,1978,278,5,1186,936,95,486,3060] },
+  ]
+  for (const [index, scenario] of scenarios.entries()) {
+    const items = itemsFor(48, `large-history-${index}`)
+    const clicks = Object.fromEntries(items.map((item,i) => [item.url, scenario.counts[i % 24]]))
+    let previous = heat.heatCanvas(items, clicks, scenario.width, scenario.available)
+    const fixed = previous.snapshot.regions.filter(r => !r.ids.includes(items[scenario.target].id))
+    for (let click = 1; click <= 5; click++) {
+      clicks[items[scenario.target].url]++
+      const next = heat.heatCanvas(items, clicks, scenario.width, scenario.available)
+      const before = previous.boxes[scenario.target], after = next.boxes[scenario.target]
+      assert.ok(area(after) > area(before) + 50, `large card stalled at ${index}/${click}`)
+      assert.ok(next.boxes.some((box,i) => i !== scenario.target && area(box) < area(previous.boxes[i]) - 1))
+      assert.equal(next.height, previous.height)
+      assert.deepEqual(next.snapshot.regions.filter(r => !r.ids.includes(items[scenario.target].id)), fixed)
+      assertTiled(next)
+      assertMotion(heat, motion, previous, next)
+      previous = next
+    }
+  }
+})
+
 test("a bookmark squeezed to its logo reclaims its cumulative heat share on a real increment", () => {
   const items = itemsFor(24, "reclaim-history")
   heat.heatCanvas(items, {}, 1356, 728)

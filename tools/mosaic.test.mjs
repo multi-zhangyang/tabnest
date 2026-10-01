@@ -1,5 +1,6 @@
 import { test, after } from "node:test"
 import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
 import { createServer } from "vite"
 import { assertMotion, assertTiled } from "./heat-assertions.mjs"
 
@@ -19,6 +20,25 @@ const itemsFor = (n, tag) =>
     url: `https://${tag}.test/${i}`,
   }))
 const area = (b) => b.width * b.height
+
+test("a 37-card remembered layout grows visibly at the smallest visual scale", async () => {
+  const snapshot = JSON.parse(await readFile(new URL("./fixtures/heat-37.json", import.meta.url), "utf8"))
+  let region = snapshot.regions[0]
+  const target = 4
+  for (let click = 0; click < 5; click++) {
+    const counts = [...region.counts]
+    counts[target]++
+    const next = heat.solveHeatRegion(region, counts, snapshot.gap, snapshot.scale)
+    const before = region.boxes[target], after = next.boxes[target]
+    assert.ok(Math.sqrt(area(after)) - Math.sqrt(area(before)) >= 3, "growth remains imperceptible")
+    assert.ok(heat.validHeatRegion(next, snapshot.gap, snapshot.scale))
+    const start = { snapshot: { ...snapshot, regions: [region] }, boxes: region.boxes.map((b,i) => ({...b,item:{id:region.ids[i]}})) }
+    const end = { snapshot: { ...snapshot, regions: [next] }, boxes: next.boxes.map((b,i) => ({...b,item:{id:next.ids[i]}})) }
+    assertTiled(end)
+    assertMotion(heat, motion, start, end)
+    region = next
+  }
+})
 
 test("large cards with mixed historical heat keep visibly growing on individual clicks", () => {
   const scenarios = [

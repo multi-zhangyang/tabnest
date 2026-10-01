@@ -812,7 +812,7 @@ function requestedHeatArea(
   const currentArea = area(r.boxes[index])
   const clickDelta = Math.max(0, counts[index] - r.counts[index])
   const visibleIncrement = clickDelta
-    ? (Math.sqrt(currentArea) + Math.min(2, Math.sqrt(clickDelta)) * 0.75) ** 2 - currentArea
+    ? (Math.sqrt(currentArea) + Math.min(2, Math.sqrt(clickDelta)) * 6) ** 2 - currentArea
     : 0
   return Math.min(
     maximum,
@@ -958,6 +958,12 @@ function fitHeatAreas(
     )
   let best = { ...r, counts }
   let bestScore = Infinity
+  const progresses = (boxes: Geometry[]) => targets.length > 0 &&
+    targets.every(i => area(boxes[i]) > area(r.boxes[i]) + 1)
+  const better = (boxes: Geometry[], value: number, tolerance = 0) => {
+    const nextProgress = progresses(boxes), currentProgress = progresses(best.boxes)
+    return nextProgress !== currentProgress ? nextProgress : value < bestScore - tolerance
+  }
   const orders = [
     r.ids.map((_, i) => i),
     r.ids.map((_, i) => i).sort((a, b) => desired[a] - desired[b] || a - b),
@@ -1025,7 +1031,7 @@ function fitHeatAreas(
       targets.every((i) => area(boxes[i]) >= area(r.boxes[i]) - EPS)
     ) {
       const value = score(boxes)
-      if (value < bestScore) {
+      if (better(boxes, value)) {
         bestScore = value
         best = { ...r, counts, cuts: projected, boxes }
       }
@@ -1130,7 +1136,7 @@ function fitHeatAreas(
       if (!boxes.every((b) => validHeatBox(b, scale, limits))) continue
       if (targets.some((i) => area(boxes[i]) < area(r.boxes[i]) - EPS)) continue
       const value = score(boxes)
-      if (value < bestScore - 0.1) {
+      if (better(boxes, value, 0.1)) {
         bestScore = value
         best = { ...r, counts, tree, cuts: projected, boxes }
       }
@@ -1160,7 +1166,7 @@ function fitHeatAreas(
         if (
           value < bestScore - 0.01 &&
           boxes.every((b) => validHeatBox(b, scale, limits)) &&
-          targets.every((i) => area(boxes[i]) >= area(r.boxes[i]) - EPS)
+          targets.every((i) => area(boxes[i]) >= area(best.boxes[i]) - EPS)
         ) {
           bestScore = value
           best = { ...best, cuts, boxes }

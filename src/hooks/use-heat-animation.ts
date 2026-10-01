@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from "react"
 import type { RefObject } from "react"
-import { safeHeatTransition, heatLimits } from "@/lib/heat-layout"
+import { safeHeatTransition, heatLimits, HEAT_MINIMUM } from "@/lib/heat-layout"
 import type { HeatBox } from "@/lib/heat-layout"
 import { HEAT_DURATION, heatMotionFrame } from "@/lib/heat-motion"
 
@@ -18,8 +18,8 @@ function paint(
     if (!rect) continue
     cell.style.left = rect.x + "px"
     cell.style.top = rect.y + "px"
-    cell.style.width = rect.width + "px"
-    cell.style.height = rect.height + "px"
+    cell.style.width = Math.max(HEAT_MINIMUM, rect.width) + "px"
+    cell.style.height = Math.max(HEAT_MINIMUM, rect.height) + "px"
   }
 }
 export function useHeatAnimation(

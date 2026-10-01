@@ -1,16 +1,16 @@
 {
-  "buildId": "2277f0090f304f0b1e7c1493c19c0585e6cf0514fe6342d3f800ce56dfaa524f",
+  "buildId": "9568047bceec259ac057f2b943e0f5a62ccab41e9deb0d6f960547a65a08d03b",
   "version": "2.7.1",
   "files": 66,
-  "archiveBytes": 764285,
-  "initialJsGzipBytes": 186027,
+  "archiveBytes": 764415,
+  "initialJsGzipBytes": 186081,
   "initialJsAssets": [
     "theme-init.js",
-    "assets/index-BHFrQPIp.js",
+    "assets/index-6OEN2wNZ.js",
     "assets/dialog-1PWRyU03.js",
     "assets/recent-AVAGlcBL.js",
     "assets/bookmarks-BCJMOjR9.js"
   ],
-  "sha256": "cdfb12e917948c7fd5c3c0dd96480ed0ac617cdd22dcacbb0eaf58066a0aac13",
+  "sha256": "3e00efa1506f317ee34d37d893fc9b60f829b2474ecef9d793ec4abe1b8e77d8",
   "archive": "TabNest-v2.7.1.zip"
 }

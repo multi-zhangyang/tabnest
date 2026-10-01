@@ -235,7 +235,14 @@ export function hydrateHeatTopologies(input?: unknown) {
           return false
         if (!validHeatRegion(r, s.gap, s.scale)) return false
         return r.ids.every((id, i) => {
-          if (typeof id !== "string" || ids.has(id) || typeof r.urls[i] !== "string" || !Number.isSafeInteger(r.counts[i]) || r.counts[i] < 0) return false
+          if (
+            typeof id !== "string" ||
+            ids.has(id) ||
+            typeof r.urls[i] !== "string" ||
+            !Number.isSafeInteger(r.counts[i]) ||
+            r.counts[i] < 0
+          )
+            return false
           ids.add(id)
           return true
         })
@@ -284,7 +291,12 @@ export async function persistHeatTopologies() {
       hydrateHeatTopologies()
       for (const [, snapshot] of own) {
         const saved = cache.get(snapshot.key)
-        if (saved && snapshot.regions.every((r, i) => r.counts.every((n, j) => n === saved.regions[i]?.counts[j]))) {
+        if (
+          saved &&
+          snapshot.regions.every((r, i) =>
+            r.counts.every((n, j) => n === saved.regions[i]?.counts[j])
+          )
+        ) {
           cache.set(snapshot.key, snapshot)
           continue
         }
@@ -319,26 +331,72 @@ export async function persistHeatTopologies() {
 
 export function validHeatRegion(r: HeatRegion, gap: number, scale: number) {
   try {
-    if (!r || !r.ids.length || r.ids.length > 24 || r.urls.length !== r.ids.length || r.counts.length !== r.ids.length || r.boxes.length !== r.ids.length ||
-        ![r.x,r.y,r.width,r.height].every(Number.isFinite) || !r.cuts.every(Number.isFinite)) return false
-    const leaves = new Set<number>(), cuts = new Set<number>()
+    if (
+      !r ||
+      !r.ids.length ||
+      r.ids.length > 24 ||
+      r.urls.length !== r.ids.length ||
+      r.counts.length !== r.ids.length ||
+      r.boxes.length !== r.ids.length ||
+      ![r.x, r.y, r.width, r.height].every(Number.isFinite) ||
+      !r.cuts.every(Number.isFinite)
+    )
+      return false
+    const leaves = new Set<number>(),
+      cuts = new Set<number>()
     const check = (tree: Tree, depth = 0): boolean => {
       if (!tree || depth > 32) return false
       if ("index" in tree) {
-        if (!Number.isInteger(tree.index) || tree.index < 0 || tree.index >= r.ids.length || leaves.has(tree.index)) return false
+        if (
+          !Number.isInteger(tree.index) ||
+          tree.index < 0 ||
+          tree.index >= r.ids.length ||
+          leaves.has(tree.index)
+        )
+          return false
         leaves.add(tree.index)
         return true
       }
-      if (typeof tree.horizontal !== "boolean" || !Number.isInteger(tree.cut) || tree.cut < 0 || tree.cut >= r.cuts.length || cuts.has(tree.cut)) return false
+      if (
+        typeof tree.horizontal !== "boolean" ||
+        !Number.isInteger(tree.cut) ||
+        tree.cut < 0 ||
+        tree.cut >= r.cuts.length ||
+        cuts.has(tree.cut)
+      )
+        return false
       cuts.add(tree.cut)
       return check(tree.left, depth + 1) && check(tree.right, depth + 1)
     }
-    if (!check(r.tree) || leaves.size !== r.ids.length || cuts.size !== r.cuts.length) return false
+    if (
+      !check(r.tree) ||
+      leaves.size !== r.ids.length ||
+      cuts.size !== r.cuts.length
+    )
+      return false
     const reconstructed = geometry(r.tree, r.cuts, r.width, r.height, gap)
-    return r.boxes.every((b,i) => b.x >= -EPS && b.y >= -EPS && b.x + b.width <= r.width + EPS && b.y + b.height <= r.height + EPS &&
-      (Object.keys(b) as (keyof Geometry)[]).every(k => Math.abs(b[k] - reconstructed[i][k]) < EPS)) &&
-      safeHeatTransition(r.boxes, r.boxes, gap, scale, heatLimits(r.width, r.height, scale))
-  } catch { return false }
+    return (
+      r.boxes.every(
+        (b, i) =>
+          b.x >= -EPS &&
+          b.y >= -EPS &&
+          b.x + b.width <= r.width + EPS &&
+          b.y + b.height <= r.height + EPS &&
+          (Object.keys(b) as (keyof Geometry)[]).every(
+            (k) => Math.abs(b[k] - reconstructed[i][k]) < EPS
+          )
+      ) &&
+      safeHeatTransition(
+        r.boxes,
+        r.boxes,
+        gap,
+        scale,
+        heatLimits(r.width, r.height, scale)
+      )
+    )
+  } catch {
+    return false
+  }
 }
 function geometry(
   tree: Tree,
@@ -374,7 +432,8 @@ function constraints(
   height: number,
   gap: number,
   scale: number,
-  reference?: Geometry[]
+  reference?: Geometry[],
+  limits = heatLimits(width, height, scale)
 ) {
   const result: Constraint[] = []
   const subtract = (a: Ref, b: Ref): Linear => ({
@@ -406,9 +465,9 @@ function constraints(
       for (const [a, b, limit] of [
         [-1, 0, -56],
         [0, -1, -56],
-        [1, 0, heatLimits(width, height, scale).edge],
-        [0, 1, heatLimits(width, height, scale).edge],
-        [aspect, 1 / aspect, 2 * Math.sqrt(heatLimits(width, height, scale).area)],
+        [1, 0, limits.edge],
+        [0, 1, limits.edge],
+        [aspect, 1 / aspect, 2 * Math.sqrt(limits.area)],
         [1, -2, 0],
         [-2, 1, 0],
         [1, -3, -112],
@@ -812,7 +871,8 @@ function requestedHeatArea(
   const currentArea = area(r.boxes[index])
   const clickDelta = Math.max(0, counts[index] - r.counts[index])
   const visibleIncrement = clickDelta
-    ? (Math.sqrt(currentArea) + Math.min(2, Math.sqrt(clickDelta)) * 6) ** 2 - currentArea
+    ? (Math.sqrt(currentArea) + Math.min(2, Math.sqrt(clickDelta)) * 6) ** 2 -
+      currentArea
     : 0
   return Math.min(
     maximum,
@@ -876,25 +936,229 @@ function redistribute(
     )
   )
     return { ...r, counts }
-  const first = adjustCuts(r, counts, gap, scale)
+  let first = adjustCuts(r, counts, gap, scale)
   if (
     targets.every(
       (i) =>
         area(first.boxes[i]) - area(r.boxes[i]) >=
-        Math.max(0, 0.7 * (requestedHeatArea(r, counts, i, scale) - area(r.boxes[i])) - EPS)
+        Math.max(
+          0,
+          0.7 * (requestedHeatArea(r, counts, i, scale) - area(r.boxes[i])) -
+            EPS
+        )
     )
   )
     return first
-  const fulfilled = targets.every(
-    (i) => area(first.boxes[i]) >= requestedHeatArea(r, counts, i, scale) - 1
+  const progresses = (candidate: Region) =>
+    targets.filter((i) => area(candidate.boxes[i]) > area(r.boxes[i]) + 1)
+      .length
+  const better = (candidate: Region) =>
+    progresses(candidate) > progresses(first) ||
+    (targets.every(
+      (i) => area(candidate.boxes[i]) >= area(first.boxes[i]) - EPS
+    ) &&
+      targets.some((i) => area(candidate.boxes[i]) > area(first.boxes[i]) + 1))
+  const responsive = (candidate: Region) =>
+    targets.every((i) => {
+      const currentArea = area(r.boxes[i]),
+        delta = requestedHeatArea(r, counts, i, scale) - currentArea
+      const ordinary =
+        counts[i] - r.counts[i] < 10 &&
+        delta <= (Math.sqrt(currentArea) + 24) ** 2 - currentArea
+      return (
+        area(candidate.boxes[i]) - currentArea >=
+        Math.max(
+          0,
+          ordinary
+            ? Math.min(Math.max(100, Math.sqrt(currentArea)), 0.7 * delta)
+            : 0.7 * delta
+        ) -
+          EPS
+      )
+    })
+  const local =
+    targets.length > 1 || targets.every((i) => counts[i] - r.counts[i] < 10)
+      ? repartitionHeatNeighbourhood(r, counts, gap, scale)
+      : { ...r, counts }
+  if (
+    responsive(local) &&
+    (safeHeatTransition(
+      r.boxes,
+      local.boxes,
+      gap,
+      scale,
+      heatLimits(r.width, r.height, scale)
+    ) ||
+      targets.every((i) => area(local.boxes[i]) >= area(first.boxes[i]) - EPS))
   )
-  if (fulfilled) return first
+    return local
+  if (better(local)) first = local
+  if (responsive(first)) return first
   const packed = pressureLayout(r, counts, gap, scale)
-  return targets.every(
-    (i) => area(packed.boxes[i]) >= area(first.boxes[i]) - EPS
-  ) && targets.some((i) => area(packed.boxes[i]) > area(first.boxes[i]) + 1)
-    ? packed
-    : first
+  if (better(packed)) return packed
+  return first
+}
+function repartitionHeatNeighbourhood(
+  r: Region,
+  counts: number[],
+  gap: number,
+  scale: number
+): Region {
+  const targets = counts.flatMap((count, i) => (count > r.counts[i] ? [i] : []))
+  const limits = heatLimits(r.width, r.height, scale)
+  const candidates: { node: Tree; leaves: number[]; slots: number[] }[] = []
+  const collect = (node: Tree): { leaves: number[]; slots: number[] } => {
+    if ("index" in node) return { leaves: [node.index], slots: [] }
+    const a = collect(node.left),
+      b = collect(node.right)
+    const group = {
+      leaves: [...a.leaves, ...b.leaves],
+      slots: [node.cut, ...a.slots, ...b.slots],
+    }
+    if (
+      group.leaves.length <= 8 &&
+      group.leaves.some((i) => targets.includes(i))
+    )
+      candidates.push({ node, ...group })
+    return group
+  }
+  collect(r.tree)
+  candidates.sort((a, b) => a.leaves.length - b.leaves.length)
+  let best = { ...r, counts }
+  for (const { node, leaves, slots } of candidates) {
+    const x = Math.min(...leaves.map((i) => r.boxes[i].x)),
+      y = Math.min(...leaves.map((i) => r.boxes[i].y))
+    const width =
+      Math.max(...leaves.map((i) => r.boxes[i].x + r.boxes[i].width)) - x
+    const height =
+      Math.max(...leaves.map((i) => r.boxes[i].y + r.boxes[i].height)) - y
+    const convert = (tree: Tree): Tree =>
+      "index" in tree
+        ? { index: leaves.indexOf(tree.index) }
+        : {
+            horizontal: tree.horizontal,
+            cut: slots.indexOf(tree.cut),
+            left: convert(tree.left),
+            right: convert(tree.right),
+          }
+    const local: Region = {
+      x: 0,
+      y: 0,
+      width,
+      height,
+      ids: leaves.map((i) => r.ids[i]),
+      urls: leaves.map((i) => r.urls[i]),
+      counts: leaves.map((i) => r.counts[i]),
+      tree: convert(node),
+      cuts: slots.map((slot) => r.cuts[slot]),
+      boxes: leaves.map((i) => ({
+        ...r.boxes[i],
+        x: r.boxes[i].x - x,
+        y: r.boxes[i].y - y,
+      })),
+    }
+    const offsetCuts = (tree: Tree) => {
+      if ("index" in tree) return
+      local.cuts[tree.cut] -= tree.horizontal ? x : y
+      offsetCuts(tree.left)
+      offsetCuts(tree.right)
+    }
+    offsetCuts(local.tree)
+    const localCounts = leaves.map((i) => counts[i])
+    const localTargets = leaves.flatMap((i, j) =>
+      targets.includes(i) ? [j] : []
+    )
+    const desired = local.boxes.map(area)
+    for (const target of localTargets) {
+      const currentArea = desired[target]
+      let delta = Math.min(
+        requestedHeatArea(r, counts, leaves[target], scale) - currentArea,
+        (Math.sqrt(currentArea) + 6) ** 2 - currentArea
+      )
+      const distances = heatNeighbourDistances(local.boxes, [target], gap)
+      const donors = leaves
+        .map((_, i) => i)
+        .filter((i) => !localTargets.includes(i))
+        .sort(
+          (a, b) =>
+            distances[a] - distances[b] ||
+            localCounts[a] - localCounts[b] ||
+            a - b
+        )
+      for (const donor of donors) {
+        const amount = Math.min(
+          Math.max(0, desired[donor] - HEAT_MINIMUM ** 2),
+          delta
+        )
+        desired[donor] -= amount
+        desired[target] += amount
+        delta -= amount
+      }
+    }
+    if (localTargets.every((i) => desired[i] <= area(local.boxes[i]) + 1))
+      continue
+    const fitted = fitHeatAreas(
+      local,
+      localCounts,
+      desired,
+      localTargets,
+      gap,
+      scale,
+      { limits, local: true }
+    )
+    const boxes = [...best.boxes]
+    leaves.forEach(
+      (i, j) =>
+        (boxes[i] = {
+          ...fitted.boxes[j],
+          x: fitted.boxes[j].x + x,
+          y: fitted.boxes[j].y + y,
+        })
+    )
+    if (
+      !targets.every((i) => area(boxes[i]) >= area(best.boxes[i]) - EPS) ||
+      !targets.some((i) => area(boxes[i]) > area(best.boxes[i]) + 1)
+    )
+      continue
+    const cuts = [...best.cuts]
+    const restore = (tree: Tree): Tree => {
+      if ("index" in tree) return { index: leaves[tree.index] }
+      cuts[slots[tree.cut]] = fitted.cuts[tree.cut] + (tree.horizontal ? x : y)
+      return {
+        horizontal: tree.horizontal,
+        cut: slots[tree.cut],
+        left: restore(tree.left),
+        right: restore(tree.right),
+      }
+    }
+    const replacement = restore(fitted.tree)
+    const replace = (tree: Tree): Tree =>
+      "index" in tree
+        ? tree
+        : "cut" in node && tree.cut === node.cut
+          ? replacement
+          : {
+              ...tree,
+              left: replace(tree.left),
+              right: replace(tree.right),
+            }
+    const candidate = { ...r, counts, tree: replace(best.tree), cuts, boxes }
+    if (!validHeatRegion(candidate, gap, scale)) continue
+    best = candidate
+    if (
+      targets.every(
+        (i) =>
+          area(best.boxes[i]) - area(r.boxes[i]) >=
+          Math.max(
+            0,
+            0.7 * (requestedHeatArea(r, counts, i, scale) - area(r.boxes[i])) -
+              EPS
+          )
+      )
+    )
+      return best
+  }
+  return best
 }
 function pressureLayout(
   r: Region,
@@ -943,9 +1207,10 @@ function fitHeatAreas(
   desired: number[],
   targets: number[],
   gap: number,
-  scale: number
+  scale: number,
+  options?: { limits: ReturnType<typeof heatLimits>; local: boolean }
 ): Region {
-  const limits = heatLimits(r.width, r.height, scale)
+  const limits = options?.limits || heatLimits(r.width, r.height, scale)
   const weights = desired
   const score = (boxes: Geometry[]) =>
     boxes.reduce(
@@ -958,11 +1223,38 @@ function fitHeatAreas(
     )
   let best = { ...r, counts }
   let bestScore = Infinity
-  const progresses = (boxes: Geometry[]) => targets.length > 0 &&
-    targets.every(i => area(boxes[i]) > area(r.boxes[i]) + 1)
+  const active = targets.filter(
+    (i) => area(r.boxes[i]) < limits.area - Math.sqrt(limits.area) / 2
+  )
+  const progresses = (boxes: Geometry[]) =>
+    active.reduce(
+      (sum, i) => sum + Number(area(boxes[i]) > area(r.boxes[i]) + 1),
+      0
+    )
+  const fulfilled = (boxes: Geometry[]) =>
+    active.length > 0 &&
+    active.every(
+      (i) =>
+        area(boxes[i]) - area(r.boxes[i]) >=
+        0.7 *
+          (options?.local
+            ? Math.min(
+                desired[i] - area(r.boxes[i]),
+                (Math.sqrt(area(r.boxes[i])) + 6) ** 2 - area(r.boxes[i])
+              )
+            : desired[i] - area(r.boxes[i])) -
+          EPS
+    )
   const better = (boxes: Geometry[], value: number, tolerance = 0) => {
-    const nextProgress = progresses(boxes), currentProgress = progresses(best.boxes)
-    return nextProgress !== currentProgress ? nextProgress : value < bestScore - tolerance
+    const nextProgress = progresses(boxes),
+      currentProgress = progresses(best.boxes)
+    if (nextProgress !== currentProgress) return nextProgress > currentProgress
+    const nextSafe =
+      fulfilled(boxes) && safeHeatTransition(r.boxes, boxes, gap, scale, limits)
+    const currentSafe =
+      fulfilled(best.boxes) &&
+      safeHeatTransition(r.boxes, best.boxes, gap, scale, limits)
+    return nextSafe !== currentSafe ? nextSafe : value < bestScore - tolerance
   }
   const orders = [
     r.ids.map((_, i) => i),
@@ -979,7 +1271,15 @@ function fitHeatAreas(
         (a, b) => r.boxes[a].x - r.boxes[b].x || r.boxes[a].y - r.boxes[b].y
       ),
   ]
-  const existingRules = constraints(r.tree, r.width, r.height, gap, scale, r.boxes)
+  const existingRules = constraints(
+    r.tree,
+    r.width,
+    r.height,
+    gap,
+    scale,
+    r.boxes,
+    limits
+  )
   if (!targets.length) {
     bestScore = score(r.boxes)
   }
@@ -1043,7 +1343,11 @@ function fitHeatAreas(
   }
   const candidateOrders = targets.length ? orders : [orders[0], orders[2]]
   for (const order of candidateOrders)
-    for (const mode of targets.length ? [0, 1, 2, 3] : [0]) {
+    for (const mode of targets.length
+      ? options?.local
+        ? [0, 1, 2]
+        : [0, 1, 2, 3]
+      : [0]) {
       const cuts: number[] = []
       const build = (
         ids: number[],
@@ -1130,8 +1434,20 @@ function fitHeatAreas(
       const tree = shape
         ? convert(shape, 0, 0, r.width, r.height)
         : build(order, 0, 0, r.width, r.height)
-      const rules = constraints(tree, r.width, r.height, gap, scale)
-      const projected = project(cuts, rules, targets.length ? 2400 : 80)
+      const rules = constraints(
+        tree,
+        r.width,
+        r.height,
+        gap,
+        scale,
+        undefined,
+        limits
+      )
+      const projected = project(
+        cuts,
+        rules,
+        targets.length ? (options?.local ? 160 : 2400) : 80
+      )
       const boxes = geometry(tree, projected, r.width, r.height, gap)
       if (!boxes.every((b) => validHeatBox(b, scale, limits))) continue
       if (targets.some((i) => area(boxes[i]) < area(r.boxes[i]) - EPS)) continue
@@ -1140,10 +1456,28 @@ function fitHeatAreas(
         bestScore = value
         best = { ...r, counts, tree, cuts: projected, boxes }
       }
+      if (
+        options?.local &&
+        fulfilled(best.boxes) &&
+        safeHeatTransition(r.boxes, best.boxes, gap, scale, limits)
+      )
+        return best
     }
   if (best.boxes !== r.boxes) {
-    const rules = constraints(best.tree, r.width, r.height, gap, scale, best.boxes)
-    for (let step = 0; step < (targets.length ? 30 : 0); step++) {
+    const rules = constraints(
+      best.tree,
+      r.width,
+      r.height,
+      gap,
+      scale,
+      best.boxes,
+      limits
+    )
+    for (
+      let step = 0;
+      step < (targets.length ? (options?.local ? 8 : 30) : 0);
+      step++
+    ) {
       const gradient = best.cuts.map((_, j) => {
         const probe = [...best.cuts]
         probe[j] += 0.1
@@ -1314,14 +1648,35 @@ export function heatCanvas(
   scale = 1,
   previous?: HeatSnapshot
 ): HeatLayout {
-  const snapshot = planHeatRegions({ items, clicks, width, available, gap, scale, previous })
-  if (!snapshot) return { boxes: [], height: Math.max(0, available), affectedIds: [] }
+  const snapshot = planHeatRegions({
+    items,
+    clicks,
+    width,
+    available,
+    gap,
+    scale,
+    previous,
+  })
+  if (!snapshot)
+    return { boxes: [], height: Math.max(0, available), affectedIds: [] }
   const affectedIds: string[] = []
   const regions = snapshot.regions.map((r) => {
-    const counts = r.urls.map((url, i) => Math.max(clicks[url] || 0, r.counts[i]))
-    const next = solveHeatRegion(r, counts, snapshot.gap, snapshot.scale, snapshot.allocationVersion !== 1)
+    const counts = r.urls.map((url, i) =>
+      Math.max(clicks[url] || 0, r.counts[i])
+    )
+    const next = solveHeatRegion(
+      r,
+      counts,
+      snapshot.gap,
+      snapshot.scale,
+      snapshot.allocationVersion !== 1
+    )
     next.boxes.forEach((b, i) => {
-      if ((Object.keys(b) as (keyof Geometry)[]).some((k) => b[k] !== r.boxes[i][k]))
+      if (
+        (Object.keys(b) as (keyof Geometry)[]).some(
+          (k) => b[k] !== r.boxes[i][k]
+        )
+      )
         affectedIds.push(r.ids[i])
     })
     return next
@@ -1329,25 +1684,60 @@ export function heatCanvas(
   const result = { ...snapshot, allocationVersion: 1 as const, regions }
   remember(result)
   const byId = new Map(items.map((i) => [i.id, i]))
-  return { height: result.height, snapshot: result, affectedIds, boxes: heatRegionBoxes(result.regions, byId) }
+  return {
+    height: result.height,
+    snapshot: result,
+    affectedIds,
+    boxes: heatRegionBoxes(result.regions, byId),
+  }
 }
 
-export function heatRegionBoxes(regions: HeatRegion[], byId: Map<string, BookmarkItem>): HeatBox[] {
-  return regions.flatMap((r) => r.boxes.map((b, i) => ({
-    ...b, x: b.x + r.x, y: b.y + r.y, item: byId.get(r.ids[i])!,
-  })))
+export function heatRegionBoxes(
+  regions: HeatRegion[],
+  byId: Map<string, BookmarkItem>
+): HeatBox[] {
+  return regions.flatMap((r) =>
+    r.boxes.map((b, i) => ({
+      ...b,
+      x: b.x + r.x,
+      y: b.y + r.y,
+      item: byId.get(r.ids[i])!,
+    }))
+  )
 }
 
-export function solveHeatRegion(r: HeatRegion, counts: number[], gap: number, scale: number, initial = false): HeatRegion {
+export function solveHeatRegion(
+  r: HeatRegion,
+  counts: number[],
+  gap: number,
+  scale: number,
+  initial = false
+): HeatRegion {
   if (!initial && counts.every((count, i) => count === r.counts[i])) return r
   if (!counts.some((count) => count > 0)) return { ...r, counts }
   if (!initial) return redistribute(r, counts, gap, scale)
-  const seedKey = JSON.stringify([r.ids.length, r.width, r.height, gap, scale, counts])
+  const seedKey = JSON.stringify([
+    r.ids.length,
+    r.width,
+    r.height,
+    gap,
+    scale,
+    counts,
+  ])
   let seed = heatSeeds.get(seedKey)
   if (!seed) {
-    const fitted = fitHeatAreas(r, counts, allocateHeatAreas(counts,
-      r.boxes.reduce((sum, box) => sum + area(box), 0),
-      heatLimits(r.width, r.height, scale).area), [], gap, scale)
+    const fitted = fitHeatAreas(
+      r,
+      counts,
+      allocateHeatAreas(
+        counts,
+        r.boxes.reduce((sum, box) => sum + area(box), 0),
+        heatLimits(r.width, r.height, scale).area
+      ),
+      [],
+      gap,
+      scale
+    )
     seed = { tree: fitted.tree, cuts: fitted.cuts, boxes: fitted.boxes }
     heatSeeds.set(seedKey, seed)
     if (heatSeeds.size > 32) heatSeeds.delete(heatSeeds.keys().next().value!)
@@ -1359,8 +1749,7 @@ export function planHeatRegions(input: HeatInput): HeatSnapshot | undefined {
   const { items, previous } = input
   let { width, scale } = input
   const { available, gap } = input
-  if (!items.length || !Number.isFinite(width) || width < 56)
-    return undefined
+  if (!items.length || !Number.isFinite(width) || width < 56) return undefined
   width = Math.round(width)
   scale = Math.max(0.75, Math.min(1.5, scale))
   const key = snapshotKey(

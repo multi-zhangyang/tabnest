@@ -54,8 +54,10 @@ export function useHeatAnimation(
     )
     const sameCollection = previousKey.current === key
     previousKey.current = key
-    for (const id of current.current.keys()) if (!targets.has(id)) current.current.delete(id)
-    for (const [id, rect] of targets) if (!current.current.has(id)) current.current.set(id, rect)
+    for (const id of current.current.keys())
+      if (!targets.has(id)) current.current.delete(id)
+    for (const [id, rect] of targets)
+      if (!current.current.has(id)) current.current.set(id, rect)
     if (
       !sameCollection ||
       !current.current.size ||
@@ -110,22 +112,36 @@ export function useHeatAnimation(
         ids: r.ids,
         limits: heatLimits(r.width, r.height, scale),
       })) || [{ ids: [...targets.keys()], limits: heatLimits(0, 0, scale) }]
-    if (
-      opacity.current < 1 ||
-      groups.some(
-        ({ ids, limits }) =>
-          !safeHeatTransition(
-            ids.filter((id) => targets.has(id)).map((id) => starts.get(id) || targets.get(id)!),
-            ids.filter((id) => targets.has(id)).map((id) => targets.get(id)!),
-            gap,
-            scale,
-            limits
-          )
+    const stagedIds = new Set(fadingIds.current)
+    for (const { ids, limits } of groups) {
+      if (
+        ids.some((id) => stagedIds.has(id)) ||
+        !safeHeatTransition(
+          ids
+            .filter((id) => targets.has(id))
+            .map((id) => starts.get(id) || targets.get(id)!),
+          ids.filter((id) => targets.has(id)).map((id) => targets.get(id)!),
+          gap,
+          scale,
+          limits
+        )
       )
-    ) {
+        for (const id of ids) if (changedIds.has(id)) stagedIds.add(id)
+    }
+    const continuous = moving.filter(([id]) => !stagedIds.has(id))
+    const interpolate = (t: number) => {
+      const sample = heatMotionFrame(
+        continuous.map(([id]) => starts.get(id)!),
+        continuous.map(([, end]) => end),
+        t,
+        true
+      )
+      continuous.forEach(([id], i) => current.current.set(id, sample.boxes[i]))
+    }
+    if (stagedIds.size) {
       const start = performance.now()
-      for (const id of fadingIds.current) changedIds.add(id)
-      fadingIds.current = changedIds
+      for (const id of stagedIds) changedIds.add(id)
+      fadingIds.current = stagedIds
       const initialOpacities = new Map<string, number>()
       for (const cell of container.current?.querySelectorAll<HTMLElement>(
         ".heat-cell"
@@ -139,14 +155,19 @@ export function useHeatAnimation(
         const t = Math.max(0, Math.min(1, (now - start) / HEAT_DURATION))
         const sample = heatMotionFrame([], [], t, false)
         opacity.current = sample.opacity
+        interpolate(t)
+        paint(container.current, current.current, changedIds)
         if (t >= 0.5 && !switched) {
           for (const cell of container.current?.querySelectorAll<HTMLElement>(
             ".heat-cell"
           ) || [])
-            if (changedIds.has(cell.dataset.itemId || ""))
+            if (stagedIds.has(cell.dataset.itemId || ""))
               cell.style.opacity = "0"
-          current.current = targets
-          paint(container.current, current.current)
+          for (const id of stagedIds) {
+            const target = targets.get(id)
+            if (target) current.current.set(id, target)
+          }
+          paint(container.current, current.current, stagedIds)
           switched = true
           opacity.current = 0
           frame.current = requestAnimationFrame(tick)
@@ -155,7 +176,7 @@ export function useHeatAnimation(
         for (const cell of container.current?.querySelectorAll<HTMLElement>(
           ".heat-cell"
         ) || [])
-          if (changedIds.has(cell.dataset.itemId || ""))
+          if (stagedIds.has(cell.dataset.itemId || ""))
             cell.style.opacity = String(
               opacity.current *
                 (t < 0.5
@@ -171,13 +192,7 @@ export function useHeatAnimation(
     const start = performance.now()
     const tick = (now: number) => {
       const t = Math.max(0, Math.min(1, (now - start) / HEAT_DURATION))
-      const sample = heatMotionFrame(
-        moving.map(([id]) => starts.get(id)!),
-        moving.map(([, end]) => end),
-        t,
-        true
-      )
-      moving.forEach(([id], i) => current.current.set(id, sample.boxes[i]))
+      interpolate(t)
       paint(container.current, current.current, changedIds)
       if (t < 1) frame.current = requestAnimationFrame(tick)
     }

@@ -21,19 +21,128 @@ const itemsFor = (n, tag) =>
   }))
 const area = (b) => b.width * b.height
 
+test("packed corners grow inside a small neighbourhood instead of repacking their region", async () => {
+  const fixtures = JSON.parse(
+    await readFile(
+      new URL("./fixtures/heat-pressure.json", import.meta.url),
+      "utf8"
+    )
+  )
+  for (const name of ["pressure-0-12", "pressure-0-14", "pressure-9-44"]) {
+    const { region, counts, scale, gap, target } = fixtures.find(
+      (f) => f.name === name
+    )
+    const next = heat.solveHeatRegion(region, counts, gap, scale)
+    assert.ok(area(next.boxes[target]) > area(region.boxes[target]) + 100, name)
+    assert.ok(heat.validHeatRegion(next, gap, scale), name)
+    const changed = next.boxes.filter((b, i) =>
+      Object.keys(b).some((k) => Math.abs(b[k] - region.boxes[i][k]) > 1e-4)
+    )
+    if (name === "pressure-0-12")
+      assert.ok(
+        changed.length <= 3,
+        "an isolated corner repacked the whole region"
+      )
+    if (name === "pressure-0-14") {
+      assert.ok(
+        changed.length <= 2,
+        "a shared boundary moved distant bookmarks"
+      )
+      assert.ok(
+        heat.safeHeatTransition(
+          region.boxes,
+          next.boxes,
+          gap,
+          scale,
+          heat.heatLimits(region.width, region.height, scale)
+        )
+      )
+    }
+    if (name === "pressure-9-44")
+      assert.ok(
+        heat.safeHeatTransition(
+          region.boxes,
+          next.boxes,
+          gap,
+          scale,
+          heat.heatLimits(region.width, region.height, scale)
+        )
+      )
+    const snapshot = { scale, gap, regions: [region] }
+    const layout = (r) => ({
+      snapshot: { ...snapshot, regions: [r] },
+      boxes: r.boxes.map((b, i) => ({ ...b, item: { id: r.ids[i] } })),
+    })
+    assertTiled(layout(next))
+    assertMotion(heat, motion, layout(region), layout(next))
+    assert.strictEqual(heat.solveHeatRegion(next, counts, gap, scale), next)
+  }
+})
+
+test("a constrained heat target does not prevent another target from growing in the same update", async () => {
+  const fixtures = JSON.parse(
+    await readFile(
+      new URL("./fixtures/heat-pressure.json", import.meta.url),
+      "utf8"
+    )
+  )
+  for (const name of ["pressure-7-8", "saturated-copy"]) {
+    const { region, counts, scale, gap, target } = fixtures.find(
+      (f) => f.name === name
+    )
+    const next = heat.solveHeatRegion(region, counts, gap, scale)
+    assert.ok(area(next.boxes[target]) > area(region.boxes[target]) + 100, name)
+    for (const [i, count] of counts.entries())
+      if (count > region.counts[i])
+        assert.ok(
+          area(next.boxes[i]) >= area(region.boxes[i]) - 1e-5,
+          `target shrank: ${name}/${i}`
+        )
+    assert.deepEqual(next.counts, counts)
+    assert.ok(heat.validHeatRegion(next, gap, scale))
+    const snapshot = { scale, gap, regions: [region] }
+    const layout = (r) => ({
+      snapshot: { ...snapshot, regions: [r] },
+      boxes: r.boxes.map((b, i) => ({ ...b, item: { id: r.ids[i] } })),
+    })
+    assertTiled(layout(next))
+    assertMotion(heat, motion, layout(region), layout(next))
+  }
+})
+
 test("a 37-card remembered layout grows visibly at the smallest visual scale", async () => {
-  const snapshot = JSON.parse(await readFile(new URL("./fixtures/heat-37.json", import.meta.url), "utf8"))
+  const snapshot = JSON.parse(
+    await readFile(new URL("./fixtures/heat-37.json", import.meta.url), "utf8")
+  )
   let region = snapshot.regions[0]
   const target = 4
   for (let click = 0; click < 5; click++) {
     const counts = [...region.counts]
     counts[target]++
-    const next = heat.solveHeatRegion(region, counts, snapshot.gap, snapshot.scale)
-    const before = region.boxes[target], after = next.boxes[target]
-    assert.ok(Math.sqrt(area(after)) - Math.sqrt(area(before)) >= 3, "growth remains imperceptible")
+    const next = heat.solveHeatRegion(
+      region,
+      counts,
+      snapshot.gap,
+      snapshot.scale
+    )
+    const before = region.boxes[target],
+      after = next.boxes[target]
+    assert.ok(
+      Math.sqrt(area(after)) - Math.sqrt(area(before)) >= 3,
+      "growth remains imperceptible"
+    )
     assert.ok(heat.validHeatRegion(next, snapshot.gap, snapshot.scale))
-    const start = { snapshot: { ...snapshot, regions: [region] }, boxes: region.boxes.map((b,i) => ({...b,item:{id:region.ids[i]}})) }
-    const end = { snapshot: { ...snapshot, regions: [next] }, boxes: next.boxes.map((b,i) => ({...b,item:{id:next.ids[i]}})) }
+    const start = {
+      snapshot: { ...snapshot, regions: [region] },
+      boxes: region.boxes.map((b, i) => ({
+        ...b,
+        item: { id: region.ids[i] },
+      })),
+    }
+    const end = {
+      snapshot: { ...snapshot, regions: [next] },
+      boxes: next.boxes.map((b, i) => ({ ...b, item: { id: next.ids[i] } })),
+    }
     assertTiled(end)
     assertMotion(heat, motion, start, end)
     region = next
@@ -42,23 +151,75 @@ test("a 37-card remembered layout grows visibly at the smallest visual scale", a
 
 test("large cards with mixed historical heat keep visibly growing on individual clicks", () => {
   const scenarios = [
-    { width: 720, available: 560, target: 0, counts: [2860,60,3,203,473,293,3424,361,841,1371,524,18,2239,0,2036,1497,1598,328,1384,1486,862,674,127,2514] },
-    { width: 1356, available: 360, target: 8, counts: [3350,1383,110,1950,0,455,1659,26,4415,73,273,34,4246,1374,5,5,1469,1801,1032,3,2704,7,4265,4086] },
-    { width: 1814, available: 560, target: 1, counts: [163,4554,2086,1580,2497,3393,2801,1146,286,297,4256,13,169,0,2725,749,1978,278,5,1186,936,95,486,3060] },
+    {
+      width: 720,
+      available: 560,
+      target: 0,
+      counts: [
+        2860, 60, 3, 203, 473, 293, 3424, 361, 841, 1371, 524, 18, 2239, 0,
+        2036, 1497, 1598, 328, 1384, 1486, 862, 674, 127, 2514,
+      ],
+    },
+    {
+      width: 1356,
+      available: 360,
+      target: 8,
+      counts: [
+        3350, 1383, 110, 1950, 0, 455, 1659, 26, 4415, 73, 273, 34, 4246, 1374,
+        5, 5, 1469, 1801, 1032, 3, 2704, 7, 4265, 4086,
+      ],
+    },
+    {
+      width: 1814,
+      available: 560,
+      target: 1,
+      counts: [
+        163, 4554, 2086, 1580, 2497, 3393, 2801, 1146, 286, 297, 4256, 13, 169,
+        0, 2725, 749, 1978, 278, 5, 1186, 936, 95, 486, 3060,
+      ],
+    },
   ]
   for (const [index, scenario] of scenarios.entries()) {
     const items = itemsFor(48, `large-history-${index}`)
-    const clicks = Object.fromEntries(items.map((item,i) => [item.url, scenario.counts[i % 24]]))
-    let previous = heat.heatCanvas(items, clicks, scenario.width, scenario.available)
-    const fixed = previous.snapshot.regions.filter(r => !r.ids.includes(items[scenario.target].id))
+    const clicks = Object.fromEntries(
+      items.map((item, i) => [item.url, scenario.counts[i % 24]])
+    )
+    let previous = heat.heatCanvas(
+      items,
+      clicks,
+      scenario.width,
+      scenario.available
+    )
+    const fixed = previous.snapshot.regions.filter(
+      (r) => !r.ids.includes(items[scenario.target].id)
+    )
     for (let click = 1; click <= 5; click++) {
       clicks[items[scenario.target].url]++
-      const next = heat.heatCanvas(items, clicks, scenario.width, scenario.available)
-      const before = previous.boxes[scenario.target], after = next.boxes[scenario.target]
-      assert.ok(area(after) > area(before) + 50, `large card stalled at ${index}/${click}`)
-      assert.ok(next.boxes.some((box,i) => i !== scenario.target && area(box) < area(previous.boxes[i]) - 1))
+      const next = heat.heatCanvas(
+        items,
+        clicks,
+        scenario.width,
+        scenario.available
+      )
+      const before = previous.boxes[scenario.target],
+        after = next.boxes[scenario.target]
+      assert.ok(
+        area(after) > area(before) + 50,
+        `large card stalled at ${index}/${click}`
+      )
+      assert.ok(
+        next.boxes.some(
+          (box, i) =>
+            i !== scenario.target && area(box) < area(previous.boxes[i]) - 1
+        )
+      )
       assert.equal(next.height, previous.height)
-      assert.deepEqual(next.snapshot.regions.filter(r => !r.ids.includes(items[scenario.target].id)), fixed)
+      assert.deepEqual(
+        next.snapshot.regions.filter(
+          (r) => !r.ids.includes(items[scenario.target].id)
+        ),
+        fixed
+      )
       assertTiled(next)
       assertMotion(heat, motion, previous, next)
       previous = next

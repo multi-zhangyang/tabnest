@@ -110,4 +110,4 @@ npm run release           # 验收后生成 ZIP、SHA-256 与发布报告
 
 [2.7.1 验收报告](docs/acceptance-2.7.1.md) · [发布数据](docs/releases/2.7.1.md) · [商店材料](docs/store-listing.md)
 
-加载 `tabnest/dist` 后需在扩展管理页重新加载，并重新打开旧标签页；设置标题旁显示版本和短构建编号。发布数据以同版本自动生成报告为准。
+加载 `tabnest/dist` 后需在扩展管理页重新加载，并重新打开旧标签页；版本在扩展管理页核对，构建编号记录于 `dist/build-info.json`。发布数据以同版本自动生成报告为准。

@@ -10,8 +10,13 @@ export function heatMotionFrame(
   continuous: boolean
 ) {
   const t = Math.max(0, Math.min(1, progress))
-  if (!continuous)
-    return { boxes: t < 0.5 ? before : after, opacity: Math.abs(1 - 2 * t) }
+  if (!continuous) {
+    const phase = Math.abs(1 - 2 * t)
+    return {
+      boxes: t < 0.5 ? before : after,
+      opacity: phase * phase * (3 - 2 * phase),
+    }
+  }
   const p = 1 - (1 - t) ** 3
   return {
     boxes: after.map((b, i) => ({

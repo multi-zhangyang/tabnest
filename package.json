@@ -18,6 +18,7 @@
     "test:surfaces": "node tools/surface-check.mjs",
     "test:mosaic": "node tools/mosaic-layout-check.mjs",
     "test:heat-growth": "node tools/heat-growth-check.mjs",
+    "test:heat-pressure": "node tools/heat-pressure-check.mjs",
     "test:navigation": "node tools/navigation-check.mjs",
     "test:memory": "node tools/memory-check.mjs",
     "test:view-switch": "node tools/view-switch-check.mjs",

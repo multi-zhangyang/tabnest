@@ -25,7 +25,6 @@ import { Button } from "@/components/ui/button"
 import { useTheme } from "./theme-provider"
 import { DEFAULT_SETTINGS } from "@/lib/bookmarks"
 import type { AppSettings } from "@/lib/types"
-import { BUILD_INFO } from "@/lib/build-info"
 
 export function SettingsDialog({
   open,
@@ -58,10 +57,7 @@ export function SettingsDialog({
         <Card className="settings-card">
           <CardHeader>
             <DialogHeader>
-              <div className="flex flex-wrap items-center gap-2">
-                <DialogTitle>外观与偏好</DialogTitle>
-                <Badge variant="secondary" title={BUILD_INFO.buildId}>{BUILD_INFO.version} · {BUILD_INFO.buildId.slice(0, 8)}</Badge>
-              </div>
+              <DialogTitle>外观与偏好</DialogTitle>
             </DialogHeader>
           </CardHeader>
           <div className="settings-content">
